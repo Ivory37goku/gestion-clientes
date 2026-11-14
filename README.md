@@ -11,7 +11,7 @@ Windows; no modifica ni comparte los datos de Control Laboral.
 - Obras con fechas, presupuesto, estado, avance y responsable.
 - Tareas por obra o cliente, con prioridades y vencimientos.
 - Agenda de visitas, citas, tareas y seguimientos.
-- Presupuestos con IVA que se pueden convertir en facturas.
+- Presupuestos con IGIC que se pueden convertir en facturas.
 - Facturas, vencimientos, pagos parciales y saldo pendiente.
 - Gastos por obra, enlaces a documentos, equipo e informes.
 - Copias JSON, exportación CSV, impresión/PDF y trabajo sin conexión.
@@ -30,7 +30,8 @@ la pantalla de inicio. La PWA guarda su interfaz para usarla sin conexión.
 ## APK Android
 
 Abre android-app en Android Studio y compila con Build → Build APK(s), o ejecuta
-el wrapper desde esa carpeta con .\gradlew.bat assembleDebug. El APK de depuración
+el wrapper desde esa carpeta con .\gradlew.bat assembleDebug. Cada compilación
+sincroniza primero los recursos web actuales con Android. El APK de depuración
 queda en android-app/app/build/outputs/apk/debug/app-debug.apk. El workflow de
 Android también publica ese APK como artifact en cada actualización de main.
 

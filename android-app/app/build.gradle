@@ -2,6 +2,23 @@ plugins {
     id 'com.android.application'
 }
 
+def webAppRoot = rootProject.projectDir.parentFile
+tasks.register('syncWebAssets', Sync) {
+    from(webAppRoot) {
+        include 'index.html', 'app.js', 'styles.css', 'manifest.json', 'sw.js', 'supabase-config.js'
+        include 'icon-192.png', 'icon-512.png', 'icon-512-maskable.png'
+    }
+    from(new File(webAppRoot, 'vendor')) {
+        into 'vendor'
+        include 'supabase.js', 'SUPABASE-LICENSE.txt'
+    }
+    into layout.projectDirectory.dir('src/main/assets')
+}
+
+tasks.named('preBuild').configure {
+    dependsOn tasks.named('syncWebAssets')
+}
+
 android {
     namespace 'com.ivory37.gestionclientes'
     compileSdk 37

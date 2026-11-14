@@ -25,13 +25,26 @@
   const monthFmt = (v) => v ? new Date(v + '-01T12:00:00').toLocaleDateString('es-ES', { month: 'long', year: 'numeric' }) : '';
   const optionHtml = (items, selected, emptyLabel) => '<option value="">' + esc(emptyLabel || 'Sin asignar') + '</option>' + items.map(x => '<option value="' + esc(x.id) + '"' + (String(x.id) === String(selected || '') ? ' selected' : '') + '>' + esc(x.name || x.title || 'Sin nombre') + '</option>').join('');
   const clone = (v) => JSON.parse(JSON.stringify(v));
-  const emptyData = () => ({ version: 1, company: { name: '', taxId: '', phone: '', email: '', address: '', currency: 'EUR', taxRate: 21, owner: '' }, leads: [], clients: [], works: [], tasks: [], quotes: [], invoices: [], payments: [], expenses: [], events: [], documents: [], team: [], _meta: { deleted: {} } });
+  const emptyData = () => ({ version: 1, company: { name: '', taxId: '', phone: '', email: '', address: '', currency: 'EUR', taxName: 'IGIC', taxRate: 7, owner: '' }, leads: [], clients: [], works: [], tasks: [], quotes: [], invoices: [], payments: [], expenses: [], events: [], documents: [], team: [], _meta: { deleted: {} } });
 
   function normalize(input) {
     const source = input && typeof input === 'object' ? input : {};
     const out = emptyData();
     Object.assign(out.company, source.company && typeof source.company === 'object' ? source.company : {});
+    // Migrate the old mainland IVA default to the general Canary Islands IGIC rate.
+    if (!source.company || !source.company.taxName) {
+      out.company.taxName = 'IGIC';
+      if (source.company && num(source.company.taxRate) === 21) out.company.taxRate = 7;
+    }
     COLLECTIONS.forEach(k => { out[k] = Array.isArray(source[k]) ? source[k].filter(x => x && x.id != null).map(x => Object.assign({}, x, { id: String(x.id) })) : []; });
+    ['quotes', 'invoices'].forEach(k => out[k].forEach(item => {
+      if (item.taxRate == null) item.taxRate = out.company.taxRate;
+      if (!item.taxName) item.taxName = num(item.taxRate) === 21 ? 'Impuesto anterior' : out.company.taxName;
+      if (item.status === 'Borrador' && num(item.taxRate) === 21 && (!source.company || !source.company.taxName)) {
+        item.taxRate = out.company.taxRate;
+        item.taxName = out.company.taxName;
+      }
+    }));
     out._meta = source._meta && typeof source._meta === 'object' ? source._meta : { deleted: {} };
     if (!out._meta.deleted) out._meta.deleted = {};
     return out;
@@ -79,9 +92,19 @@
         clearTimeout(syncTimer);
         syncTimer = setTimeout(() => syncCloud(false), 900);
       }
+      return true;
     } catch (err) {
-      toast('No hay espacio suficiente para guardar. Exporta una copia y libera espacio.', 'bad');
+      toast('No se pudieron guardar los cambios. Libera espacio o exporta una copia.', 'bad');
+      return false;
     }
+  }
+
+  function commitChange(mutate) {
+    const previous = clone(data);
+    mutate();
+    if (save()) return true;
+    data = previous;
+    return false;
   }
 
   function mirrorBridgeStorage() {
@@ -304,7 +327,8 @@
         settingsField('phone', 'Teléfono', data.company.phone, 'tel') +
         settingsField('email', 'Correo electrónico', data.company.email, 'email') +
         settingsField('owner', 'Tu nombre', data.company.owner, 'text') +
-        settingsField('taxRate', 'IVA por defecto (%)', data.company.taxRate, 'number') +
+        settingsField('taxRate', 'IGIC por defecto (%)', data.company.taxRate, 'number') +
+        '<p class="modal-note full" style="grid-column:1/-1;margin:0">Tipo general en Canarias: 7 %. Ajusta el porcentaje si la operación lleva otro tipo o está exenta.</p>' +
         settingsField('address', 'Dirección', data.company.address, 'text', 'full') +
         '</div><div style="margin-top:14px">' + btn('Guardar empresa', 'save-company', 'btn-primary', ' type="submit"') + '</div></form></section>' +
         '<div style="margin-top:14px">' + card('Cómo se organiza la información', '<div class="list"><div class="row-item"><div class="row-main"><div class="row-title">Lead → cliente</div><div class="row-sub">Convierte un contacto ganado y conserva su historial comercial.</div></div></div><div class="row-item"><div class="row-main"><div class="row-title">Cliente → obras</div><div class="row-sub">Un cliente puede tener varias obras, presupuestos, facturas y tareas.</div></div></div><div class="row-item"><div class="row-main"><div class="row-title">Obra → tareas y costes</div><div class="row-sub">Asigna responsables, fechas, gastos y documentación vinculada.</div></div></div></div>', 'Los datos se guardan primero en este dispositivo.') + '</div>';
@@ -336,8 +360,8 @@
     if (type === 'client') { add('Contacto', item.name); add('CIF / NIF', item.taxId); add('Teléfono', item.phone); add('Correo', item.email); add('Dirección', item.address); add('Notas', item.notes); }
     if (type === 'work') { add('Cliente', selected(data.clients, item.clientId)); add('Estado', item.status); add('Dirección', item.address); add('Inicio', dateFmt(item.start)); add('Entrega prevista', dateFmt(item.end)); add('Presupuesto', money(item.budget)); add('Avance', num(item.progress) + '%'); add('Responsable', teamName(item.owner)); add('Notas', item.notes); }
     if (type === 'task') { add('Estado', item.status); add('Prioridad', item.priority); add('Obra', workName(item.workId)); add('Cliente', selected(data.clients, item.clientId)); add('Fecha límite', dateFmt(item.due)); add('Responsable', teamName(item.owner)); add('Descripción', item.description); }
-    if (type === 'quote') { add('Cliente', selected(data.clients, item.clientId)); add('Obra', workName(item.workId)); add('Estado', item.status); add('Fecha', dateFmt(item.date)); add('Válido hasta', dateFmt(item.validUntil)); add('Base imponible', money(item.amount)); add('IVA', num(item.taxRate) + '%'); add('Total', money(total(item))); add('Descripción', item.notes); }
-    if (type === 'invoice') { add('Cliente', selected(data.clients, item.clientId)); add('Obra', workName(item.workId)); add('Estado', item.status); add('Emisión', dateFmt(item.date)); add('Vencimiento', dateFmt(item.due)); add('Total', money(total(item))); add('Cobrado', money(paidFor(item))); add('Pendiente', money(outstanding(item))); add('Descripción', item.notes); }
+    if (type === 'quote') { add('Cliente', selected(data.clients, item.clientId)); add('Obra', workName(item.workId)); add('Estado', item.status); add('Fecha', dateFmt(item.date)); add('Válido hasta', dateFmt(item.validUntil)); add('Base imponible', money(item.amount)); add(item.taxName || (num(item.taxRate) === 21 ? 'Impuesto anterior' : 'IGIC'), num(item.taxRate) + '%'); add('Total', money(total(item))); add('Descripción', item.notes); }
+    if (type === 'invoice') { add('Cliente', selected(data.clients, item.clientId)); add('Obra', workName(item.workId)); add('Estado', item.status); add('Emisión', dateFmt(item.date)); add('Vencimiento', dateFmt(item.due)); add('Base imponible', money(item.amount)); add(item.taxName || (num(item.taxRate) === 21 ? 'Impuesto anterior' : 'IGIC'), num(item.taxRate) + '%'); add('Total', money(total(item))); add('Cobrado', money(paidFor(item))); add('Pendiente', money(outstanding(item))); add('Descripción', item.notes); }
     if (type === 'expense') { add('Categoría', item.category); add('Proveedor', item.vendor); add('Fecha', dateFmt(item.date)); add('Importe', money(item.amount)); add('Obra', workName(item.workId)); add('Notas', item.notes); }
     if (type === 'event') { add('Fecha', dateFmt(item.date)); add('Hora', item.time); add('Tipo', item.kind); add('Responsable', teamName(item.owner)); add('Notas', item.notes); }
     if (type === 'document') { add('Tipo', item.kind); add('Relacionado con', workName(item.workId) || selected(data.clients, item.clientId)); add('Enlace', item.url); add('Notas', item.notes); }
@@ -364,10 +388,10 @@
       ['title', 'Tarea', 'text', true], ['workId', 'Obra relacionada', 'work'], ['clientId', 'Cliente', 'client'], ['due', 'Fecha límite', 'date'], ['priority', 'Prioridad', 'select', false, ['Alta', 'Media', 'Baja']], ['status', 'Estado', 'select', false, STATUS.task], ['owner', 'Responsable', 'team'], ['description', 'Descripción', 'textarea', false, null, 'full']
     ],
     quote: [
-      ['title', 'Concepto / asunto', 'text', true], ['number', 'Número de presupuesto', 'text'], ['clientId', 'Cliente', 'client', true], ['workId', 'Obra relacionada', 'work'], ['date', 'Fecha', 'date'], ['validUntil', 'Válido hasta', 'date'], ['amount', 'Base imponible (€)', 'number', true], ['taxRate', 'IVA (%)', 'number'], ['status', 'Estado', 'select', false, STATUS.quote], ['notes', 'Detalle y condiciones', 'textarea', false, null, 'full']
+      ['title', 'Concepto / asunto', 'text', true], ['number', 'Número de presupuesto', 'text'], ['clientId', 'Cliente', 'client', true], ['workId', 'Obra relacionada', 'work'], ['date', 'Fecha', 'date'], ['validUntil', 'Válido hasta', 'date'], ['amount', 'Base imponible (€)', 'number', true], ['taxRate', 'IGIC (%)', 'number'], ['status', 'Estado', 'select', false, STATUS.quote], ['notes', 'Detalle y condiciones', 'textarea', false, null, 'full']
     ],
     invoice: [
-      ['title', 'Concepto / asunto', 'text', true], ['number', 'Número de factura', 'text'], ['clientId', 'Cliente', 'client', true], ['workId', 'Obra relacionada', 'work'], ['date', 'Fecha de emisión', 'date'], ['due', 'Fecha de vencimiento', 'date'], ['amount', 'Base imponible (€)', 'number', true], ['taxRate', 'IVA (%)', 'number'], ['status', 'Estado', 'select', false, STATUS.invoice], ['notes', 'Detalle', 'textarea', false, null, 'full']
+      ['title', 'Concepto / asunto', 'text', true], ['number', 'Número de factura', 'text'], ['clientId', 'Cliente', 'client', true], ['workId', 'Obra relacionada', 'work'], ['date', 'Fecha de emisión', 'date'], ['due', 'Fecha de vencimiento', 'date'], ['amount', 'Base imponible (€)', 'number', true], ['taxRate', 'IGIC (%)', 'number'], ['status', 'Estado', 'select', false, STATUS.invoice], ['notes', 'Detalle', 'textarea', false, null, 'full']
     ],
     expense: [
       ['title', 'Concepto del gasto', 'text', true], ['category', 'Categoría', 'select', false, ['Materiales', 'Personal', 'Transporte', 'Herramientas', 'Subcontrata', 'Suministros', 'Otros']], ['vendor', 'Proveedor', 'text'], ['date', 'Fecha', 'date'], ['amount', 'Importe (€)', 'number', true], ['workId', 'Obra relacionada', 'work'], ['paid', 'Estado de pago', 'select', false, ['Pendiente', 'Pagado']], ['notes', 'Notas', 'textarea', false, null, 'full']
@@ -454,18 +478,17 @@
       toast('Añade un enlace http o https válido para el documento.', 'bad');
       return;
     }
+    if (['quote', 'invoice'].includes(type) && !form.dataset.id) values.taxName = data.company.taxName || 'IGIC';
     if (type === 'invoice' && values.status === 'Pagada') values.status = 'Emitida';
     if (type === 'lead' && values.probability === 0) values.probability = defaultProbability(values.stage);
     const id = form.dataset.id;
     const time = nowIso();
-    if (id) {
-      const index = data[collection].findIndex(x => x.id === id);
-      if (index >= 0) data[collection][index] = Object.assign({}, data[collection][index], values, { updatedAt: time });
-    } else {
-      const record = Object.assign({ id: uid(), createdAt: time, updatedAt: time }, values);
-      data[collection].unshift(record);
-    }
-    save();
+    const index = id ? data[collection].findIndex(x => x.id === id) : -1;
+    if (id && index < 0) { toast('No se encontró el registro. Actualiza la lista e inténtalo de nuevo.', 'bad'); return; }
+    if (!commitChange(() => {
+      if (id) data[collection][index] = Object.assign({}, data[collection][index], values, { updatedAt: time });
+      else data[collection].unshift(Object.assign({ id: uid(), createdAt: time, updatedAt: time }, values));
+    })) return;
     $('#modal-root').innerHTML = '';
     render();
     toast((id ? 'Cambios guardados' : 'Registro creado') + ' correctamente.', 'good');
@@ -476,16 +499,17 @@
     if (!collection || !confirm('¿Eliminar este ' + TYPE_LABEL[type] + '? Esta acción no se puede deshacer.')) return;
     const record = data[collection].find(x => x.id === id);
     if (!record) return;
-    data[collection] = data[collection].filter(x => x.id !== id);
-    data._meta.deleted[collection] = data._meta.deleted[collection] || {};
-    data._meta.deleted[collection][id] = Date.now();
-    if (type === 'invoice') {
-      const invoicePayments = data.payments.filter(p => p.invoiceId === id);
-      data._meta.deleted.payments = data._meta.deleted.payments || {};
-      invoicePayments.forEach(p => { data._meta.deleted.payments[p.id] = Date.now(); });
-      data.payments = data.payments.filter(p => p.invoiceId !== id);
-    }
-    save();
+    if (!commitChange(() => {
+      data[collection] = data[collection].filter(x => x.id !== id);
+      data._meta.deleted[collection] = data._meta.deleted[collection] || {};
+      data._meta.deleted[collection][id] = Date.now();
+      if (type === 'invoice') {
+        const invoicePayments = data.payments.filter(p => p.invoiceId === id);
+        data._meta.deleted.payments = data._meta.deleted.payments || {};
+        invoicePayments.forEach(p => { data._meta.deleted.payments[p.id] = Date.now(); });
+        data.payments = data.payments.filter(p => p.invoiceId !== id);
+      }
+    })) return;
     $('#modal-root').innerHTML = '';
     render();
     toast('Registro eliminado.', 'good');
@@ -497,14 +521,16 @@
     if (!confirm('Se creará un cliente y una obra con los datos del lead. ¿Continuar?')) return;
     const time = nowIso();
     const client = { id: uid(), name: lead.name || '', company: lead.company || lead.name || '', phone: lead.phone || '', email: lead.email || '', notes: lead.notes || '', createdAt: time, updatedAt: time, sourceLeadId: lead.id };
-    data.clients.unshift(client);
     const work = { id: uid(), name: lead.company ? 'Obra · ' + lead.company : 'Nueva obra · ' + lead.name, clientId: client.id, status: 'Pendiente', budget: num(lead.value), progress: 0, notes: 'Creada desde el lead. Completa dirección, fechas y alcance.', createdAt: time, updatedAt: time, sourceLeadId: lead.id };
-    data.works.unshift(work);
-    lead.stage = 'Ganado';
-    lead.clientId = client.id;
-    lead.workId = work.id;
-    lead.updatedAt = time;
-    save();
+    if (!commitChange(() => {
+      data.clients.unshift(client);
+      data.works.unshift(work);
+      const currentLead = data.leads.find(x => x.id === id);
+      currentLead.stage = 'Ganado';
+      currentLead.clientId = client.id;
+      currentLead.workId = work.id;
+      currentLead.updatedAt = time;
+    })) return;
     $('#modal-root').innerHTML = '';
     render();
     toast('Lead convertido. Ya tienes el cliente y su nueva obra.', 'good');
@@ -513,11 +539,14 @@
   function quoteToInvoice(id) {
     const q = data.quotes.find(x => x.id === id);
     if (!q) return;
-    const invoice = { id: uid(), title: q.title, number: '', clientId: q.clientId, workId: q.workId, date: today, due: '', amount: num(q.amount), taxRate: num(q.taxRate), status: 'Borrador', notes: q.notes || 'Creada desde presupuesto ' + (q.number || q.title), createdAt: nowIso(), updatedAt: nowIso(), sourceQuoteId: q.id };
-    data.invoices.unshift(invoice);
-    q.status = 'Aceptada';
-    q.updatedAt = nowIso();
-    save();
+    const time = nowIso();
+    const invoice = { id: uid(), title: q.title, number: '', clientId: q.clientId, workId: q.workId, date: today, due: '', amount: num(q.amount), taxName: q.taxName || data.company.taxName || 'IGIC', taxRate: num(q.taxRate), status: 'Borrador', notes: q.notes || 'Creada desde presupuesto ' + (q.number || q.title), createdAt: time, updatedAt: time, sourceQuoteId: q.id };
+    if (!commitChange(() => {
+      data.invoices.unshift(invoice);
+      const currentQuote = data.quotes.find(x => x.id === id);
+      currentQuote.status = 'Aceptada';
+      currentQuote.updatedAt = time;
+    })) return;
     $('#modal-root').innerHTML = '';
     setView('finance');
     toast('Presupuesto convertido en factura borrador.', 'good');
@@ -653,7 +682,7 @@
         const parsed = JSON.parse(String(reader.result || '{}'));
         const incoming = normalize(parsed.data || parsed);
         if (!confirm('Restaurar sustituirá los datos actuales de esta instalación. ¿Continuar?')) return;
-        data = incoming; save(); render(); toast('Copia restaurada correctamente.', 'good');
+        if (commitChange(() => { data = incoming; })) { render(); toast('Copia restaurada correctamente.', 'good'); }
       } catch (_) { toast('El archivo no contiene una copia válida.', 'bad'); }
     };
     reader.readAsText(file);
@@ -697,7 +726,7 @@
     if (action === 'payment') { openPayment(target.dataset.id); return; }
     if (action === 'toggle-task') {
       const t = data.tasks.find(x => x.id === target.dataset.id);
-      if (t) { t.status = t.status === 'Hecha' ? 'Pendiente' : 'Hecha'; t.updatedAt = nowIso(); save(); render(); }
+      if (t && commitChange(() => { t.status = t.status === 'Hecha' ? 'Pendiente' : 'Hecha'; t.updatedAt = nowIso(); })) render();
       return;
     }
     if (action === 'settings-tab') { settingsTab = target.dataset.tab || 'empresa'; if (view !== 'settings') { setView('settings'); return; } render(); return; }
@@ -719,16 +748,25 @@
     const nav = event.target.closest('[data-view]');
     if (nav) { event.preventDefault(); setView(nav.dataset.view); return; }
     const target = event.target.closest('[data-action]');
-    if (target) handleAction(target);
+    if (target) {
+      // A submit button has no data-action of its own, so its closest action
+      // ancestor is the backdrop. Ignore clicks within the modal itself.
+      if (target.dataset.action === 'backdrop' && event.target !== target) return;
+      handleAction(target);
+    }
   });
   document.addEventListener('submit', (event) => {
     if (event.target.id === 'entity-form') { event.preventDefault(); saveEntity(event.target); }
     else if (event.target.id === 'company-form') {
       event.preventDefault();
-      new FormData(event.target).forEach((v, k) => { data.company[k] = String(v).trim(); });
-      data.company.taxRate = num(data.company.taxRate);
-      data._meta.companyUpdated = Date.now();
-      save(); render(); toast('Datos de empresa guardados.', 'good');
+      const companyValues = {};
+      new FormData(event.target).forEach((v, k) => { companyValues[k] = String(v).trim(); });
+      companyValues.taxName = 'IGIC';
+      companyValues.taxRate = num(companyValues.taxRate);
+      if (commitChange(() => {
+        Object.assign(data.company, companyValues);
+        data._meta.companyUpdated = Date.now();
+      })) { render(); toast('Datos de empresa guardados.', 'good'); }
     } else if (event.target.id === 'cloud-form') {
       event.preventDefault();
       const mode = event.submitter && event.submitter.dataset.cloudMode || 'login';
