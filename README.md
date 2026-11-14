@@ -48,8 +48,9 @@ El workflow de Windows adjunta ambos EXE como artifacts de GitHub Actions.
 
 ## Sincronización en la nube
 
-En Ajustes y equipo → Datos y nube, inicia sesión con una cuenta. Antes, ejecuta
-supabase-setup.sql en SQL Editor de tu proyecto Supabase. La app utiliza
+En Ajustes y equipo → Datos y nube, confirma el correo de la cuenta y luego
+inicia sesión. Si falta la tabla, descarga el SQL desde esa pantalla y ejecútalo
+en el Editor SQL del proyecto Supabase. La app utiliza
 supabase-config.js y guarda todo en la tabla gestion_clientes, protegida por RLS.
 La tabla, la clave de sesión y el almacenamiento local de Gestión Clientes son
 independientes de Control Laboral.

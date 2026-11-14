@@ -125,6 +125,14 @@ html{scroll-behavior:smooth}body{margin:0;min-height:100vh;background:radial-gra
 .conversion-choice small{color:var(--muted);font-size:9px;line-height:1.45}
 .choice-arrow{color:var(--brand);font-size:16px;font-weight:800}
 .conversion-footnote{margin-top:12px}
+.cloud-alert,.cloud-setup-help{margin-top:13px;padding:12px;border:1px solid rgba(251,191,36,.22);border-radius:11px;background:rgba(251,191,36,.045)}
+.cloud-alert{border-color:rgba(248,113,113,.28);background:rgba(248,113,113,.045)}
+.cloud-alert strong,.cloud-setup-help>strong{font-size:11px}
+.cloud-alert p,.cloud-setup-help li{color:var(--muted);font-size:10px;line-height:1.5}
+.cloud-alert p{margin:5px 0 0}
+.cloud-setup-help ol{margin:7px 0 10px;padding-left:19px}
+.cloud-setup-help li+li{margin-top:4px}
+.cloud-setup-actions{display:flex;gap:7px;flex-wrap:wrap}
 .list-flow-row .row-main[data-action="detail"]{cursor:pointer}
 .list-flow-row .row-main[data-action="detail"]:hover .row-title{color:var(--brand)}
 .list-flow-row .row-end{align-items:flex-end}

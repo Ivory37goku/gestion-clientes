@@ -71,16 +71,16 @@ ipcMain.handle('gestionclientes:save-file', async (event, fileName, mimeType, en
   if (!isTrustedAppDocument(event.senderFrame?.url || '') || typeof encoded !== 'string'
     || encoded.length > (12 * 1024 * 1024 * 4 / 3) + 16 || !/^[A-Za-z0-9+/]*={0,2}$/.test(encoded)) return false;
   const mime = String(mimeType || '').split(';', 1)[0].trim().toLowerCase();
-  if (mime !== 'application/json' && mime !== 'text/csv') return false;
+  if (!['application/json', 'text/csv', 'text/plain'].includes(mime)) return false;
   const safeName = String(fileName || 'backup.json').replace(/[\u0000-\u001f\\/:*?"<>|]/g, '_').trim().slice(0, 120) || 'backup.json';
   const bytes = Buffer.from(encoded, 'base64');
   if (bytes.length > 12 * 1024 * 1024) return false;
-  const extension = mime === 'application/json' ? 'json' : 'csv';
+  const extension = mime === 'application/json' ? 'json' : mime === 'text/csv' ? 'csv' : 'sql';
   const defaultName = safeName.toLowerCase().endsWith('.' + extension) ? safeName : safeName + '.' + extension;
   const options = {
     title: 'Guardar archivo de Gestión Clientes',
     defaultPath: path.join(app.getPath('downloads'), defaultName),
-    filters: [{ name: extension.toUpperCase(), extensions: [extension] }]
+    filters: [{ name: extension.toUpperCase() + ' (' + extension + ')', extensions: [extension] }]
   };
   try {
     const owner = BrowserWindow.fromWebContents(event.sender);

@@ -3,6 +3,32 @@
 
   const KEY = 'gestion_clientes_data_v1';
   const CLOUD_TABLE = 'gestion_clientes';
+  const CLOUD_SETUP_SQL = `-- Gestión Clientes: tabla privada de sincronización.
+create table if not exists public.gestion_clientes (
+  user_id uuid primary key references auth.users (id) on delete cascade,
+  payload jsonb not null default '{}'::jsonb,
+  updated_at timestamptz not null default now()
+);
+
+alter table public.gestion_clientes enable row level security;
+
+drop policy if exists "Users can read their own company data" on public.gestion_clientes;
+create policy "Users can read their own company data"
+  on public.gestion_clientes for select
+  using (auth.uid() = user_id);
+
+drop policy if exists "Users can create their own company data" on public.gestion_clientes;
+create policy "Users can create their own company data"
+  on public.gestion_clientes for insert
+  with check (auth.uid() = user_id);
+
+drop policy if exists "Users can update their own company data" on public.gestion_clientes;
+create policy "Users can update their own company data"
+  on public.gestion_clientes for update
+  using (auth.uid() = user_id)
+  with check (auth.uid() = user_id);
+
+grant select, insert, update on public.gestion_clientes to authenticated;`;
   const COLLECTIONS = ['leads', 'clients', 'works', 'tasks', 'quotes', 'invoices', 'payments', 'expenses', 'events', 'documents', 'team'];
   const TITLES = { dashboard: 'Resumen', agenda: 'Agenda', leads: 'Leads', clients: 'Clientes', works: 'Obras', tasks: 'Tareas', quotes: 'Presupuestos', finance: 'Facturas y gastos', documents: 'Documentos', reports: 'Informes', settings: 'Ajustes y equipo' };
   const STATUS = {
@@ -67,6 +93,9 @@
   let filterValue = 'all';
   let supa = null;
   let cloudUser = null;
+  let cloudProblem = '';
+  let cloudSetupRequired = false;
+  let cloudEmailDraft = '';
   let syncTimer = null;
   let cloudBusy = false;
   let settingsTab = 'empresa';
@@ -346,10 +375,17 @@
       const list = data.team.length ? '<div class="list">' + data.team.map(x => row(x.name, [x.role, x.email, x.phone].filter(Boolean).join(' · '), x.active === false ? 'Inactivo' : 'Activo', '<div class="row-actions"><button class="tiny-btn" data-action="edit" data-type="team" data-id="' + esc(x.id) + '">Editar</button><button class="tiny-btn danger" data-action="delete" data-type="team" data-id="' + esc(x.id) + '">Eliminar</button></div>', '', x.id, 'team')).join('') + '</div>' : empty('Añade a tu equipo', 'Después podrás asignar responsables a las obras y tareas.', 'team', 'Añadir persona');
       return header('PERSONAS', 'Ajustes y equipo', 'Organiza responsables y asignaciones.') + nav + card('Equipo', list, 'Personas que pueden aparecer como responsables', newBtn('team', 'Añadir persona'));
     }
-    const cloudPanel = '<div class="card"><div class="card-head"><div><h2>Sincronización privada</h2><p>Usa tu cuenta para mantener una copia actualizada entre dispositivos.</p></div><span class="badge ' + (cloudUser ? 'green' : '') + '">' + esc(cloudUser ? cloudUser.email : 'Desconectado') + '</span></div>' +
+    const cloudConfig = window.GESTION_CLIENTES_SUPABASE_CONFIG || {};
+    let projectRef = '';
+    try { projectRef = new URL(cloudConfig.url || '').hostname.split('.')[0]; } catch (_) {}
+    const sqlEditorUrl = projectRef ? 'https://supabase.com/dashboard/project/' + encodeURIComponent(projectRef) + '/sql/new' : 'https://supabase.com/dashboard';
+    const setupActions = '<div class="cloud-setup-actions"><button type="button" class="btn btn-sm" data-action="cloud-setup">Descargar SQL de configuración</button><a class="btn btn-sm" href="' + esc(sqlEditorUrl) + '" target="_blank" rel="noopener">Abrir Editor SQL ↗</a></div>';
+    const cloudWarning = cloudProblem ? '<div class="cloud-alert" role="alert"><strong>Hay que revisar la conexión</strong><p>' + esc(cloudProblem) + '</p>' + (cloudSetupRequired ? setupActions : '') + '</div>' : '';
+    const cloudSetupHelp = !cloudUser && !cloudProblem ? '<div class="cloud-setup-help"><strong>Si es la primera vez</strong><ol><li>Confirma el correo que Supabase envió para activar tu cuenta.</li><li>Si la sincronización avisa que falta la tabla, ejecuta una vez el SQL en el proyecto.</li></ol>' + setupActions + '</div>' : '';
+    const cloudPanel = '<div class="card"><div class="card-head"><div><h2>Sincronización privada</h2><p>Usa tu cuenta para mantener una copia actualizada entre dispositivos.</p></div><span class="badge ' + (cloudProblem ? 'yellow' : cloudUser ? 'green' : '') + '">' + esc(cloudUser ? cloudUser.email : cloudProblem ? 'Requiere atención' : 'Desconectado') + '</span></div>' + cloudWarning +
       (cloudUser ? '<p class="modal-note">Los cambios se sincronizan en segundo plano cuando hay conexión. Las copias locales siguen disponibles sin internet.</p><div class="head-actions"><button class="btn btn-primary" data-action="cloud-sync">Sincronizar ahora</button><button class="btn" data-action="cloud-logout">Cerrar sesión</button></div>' :
-        '<p class="modal-note">El almacenamiento y las copias JSON funcionan sin cuenta. Para sincronizar, crea una cuenta privada o inicia sesión.</p><form id="cloud-form"><div class="fields"><div class="field"><label for="cloud-email">Correo</label><input id="cloud-email" name="email" type="email" autocomplete="username" required></div><div class="field"><label for="cloud-password">Contraseña</label><input id="cloud-password" name="password" type="password" autocomplete="current-password" minlength="6" required><span class="hint">El acceso admite la contraseña de 6 caracteres que ya creaste.</span></div></div><div class="head-actions" style="margin-top:12px"><button class="btn btn-primary" type="submit" data-cloud-mode="login">Iniciar sesión</button><button class="btn" type="submit" data-cloud-mode="signup">Crear cuenta</button></div></form>') +
-      '<p class="modal-note" style="margin-top:14px">La sincronización necesita configurar una tabla propia en Supabase. Consulta <code>supabase-setup.sql</code>.</p></div>';
+        '<p class="modal-note">El almacenamiento y las copias JSON funcionan sin cuenta. Para sincronizar, inicia sesión con la misma cuenta del teléfono.</p><form id="cloud-form"><div class="fields"><div class="field"><label for="cloud-email">Correo</label><input id="cloud-email" name="email" type="email" value="' + esc(cloudEmailDraft) + '" autocomplete="username" required></div><div class="field"><label for="cloud-password">Contraseña</label><input id="cloud-password" name="password" type="password" autocomplete="current-password" minlength="6" required><span class="hint">El acceso admite la contraseña de 6 caracteres que ya creaste.</span></div></div><div class="head-actions" style="margin-top:12px"><button class="btn btn-primary" type="submit" data-cloud-mode="login">Iniciar sesión</button><button class="btn" type="submit" data-cloud-mode="signup">Crear cuenta</button></div></form>') +
+      cloudSetupHelp + '</div>';
     const dataPanel = '<div class="card"><div class="card-head"><div><h2>Copias y exportaciones</h2><p>Conserva tus datos o llévalos a otra instalación.</p></div></div><div class="head-actions"><button class="btn btn-primary" data-action="backup">Descargar copia JSON</button><button class="btn" data-action="restore">Restaurar copia</button><button class="btn" data-action="export-all">Exportar registros CSV</button><input id="restore-input" type="file" accept="application/json,.json" hidden></div><p class="modal-note" style="margin-top:12px">La copia JSON incluye todos los registros, relaciones, configuración e historial de cobros.</p></div>';
     return header('DATOS', 'Ajustes y equipo', 'Copias de seguridad y sincronización en tus dispositivos.') + nav + '<div class="stack">' + dataPanel + cloudPanel + card('Almacenamiento', '<div class="row-item"><div class="row-main"><div class="row-title">Datos locales</div><div class="row-sub">Guardados automáticamente en este dispositivo.</div></div><span class="badge green">Activo</span></div>', 'Sin conexión disponible') + '</div>';
   }
@@ -831,14 +867,41 @@
 
   async function initCloud() {
     const cfg = window.GESTION_CLIENTES_SUPABASE_CONFIG || {};
-    if (!window.supabase || !cfg.url || !cfg.publishableKey) return;
+    if (!window.supabase || !cfg.url || !cfg.publishableKey) {
+      cloudProblem = 'La conexión de nube no está configurada en esta instalación.';
+      updateCloudPill('error');
+      return;
+    }
     try {
       supa = window.supabase.createClient(cfg.url, cfg.publishableKey, { auth: { persistSession: true, autoRefreshToken: true, detectSessionInUrl: true, storageKey: 'gestion_clientes_auth_v1' } });
       const { data: result } = await supa.auth.getSession();
       cloudUser = result && result.session ? result.session.user : null;
       if (cloudUser) syncCloud(false);
       updateCloudPill();
-    } catch (err) { console.warn('No se pudo iniciar la sincronización.', err); }
+    } catch (err) { console.warn('No se pudo iniciar la sincronización.', err); cloudProblem = cloudErrorMessage(err); updateCloudPill('error'); }
+  }
+  function cloudErrorMessage(error) {
+    const code = String(error && error.code || '').toLowerCase();
+    const message = String(error && error.message || error || '').toLowerCase();
+    if (code === 'pgrst205' || code === '42p01' || /could not find the table|relation .* does not exist/.test(message)) {
+      return 'Falta crear la tabla privada de sincronización en Supabase. Descarga el SQL y ejecútalo una vez en el Editor SQL del proyecto.';
+    }
+    if (/email_not_confirmed|email not confirmed|email confirmation/.test(code + ' ' + message)) {
+      return 'Confirma el correo que Supabase envió al crear la cuenta. Después inicia sesión con esos mismos datos.';
+    }
+    if (/invalid_credentials|invalid login credentials|invalid email or password/.test(code + ' ' + message)) {
+      return 'El correo o la contraseña no coinciden. Comprueba que usas la cuenta creada en el móvil y su contraseña de 6 caracteres.';
+    }
+    if (/weak_password|password.*(too short|at least|minimum)/.test(code + ' ' + message)) {
+      return 'Supabase rechazó la contraseña al crear la cuenta. Usa la contraseña de la cuenta existente para iniciar sesión.';
+    }
+    if (/failed to fetch|network|fetcherror|timeout/.test(code + ' ' + message)) {
+      return 'No se pudo conectar con Supabase. Comprueba internet e inténtalo de nuevo.';
+    }
+    if (/permission denied|row-level security|rls|42501/.test(code + ' ' + message)) {
+      return 'Supabase bloqueó el acceso a la tabla. Ejecuta el SQL de configuración para aplicar los permisos privados.';
+    }
+    return 'No se pudo conectar. ' + String(error && error.message || 'Comprueba el correo, la conexión y la configuración de Supabase.');
   }
   function updateCloudPill(state) {
     const pill = $('#sync-pill');
@@ -857,6 +920,8 @@
       const payload = clone(data);
       const saveResult = await supa.from(CLOUD_TABLE).upsert({ user_id: cloudUser.id, payload, updated_at: nowIso() }, { onConflict: 'user_id' });
       if (saveResult.error) throw saveResult.error;
+      cloudProblem = '';
+      cloudSetupRequired = false;
       localStorage.setItem(KEY, JSON.stringify(data));
       localStorage.setItem(KEY + '_cloud_at', nowIso());
       mirrorBridgeStorage();
@@ -865,35 +930,53 @@
       if (view === 'settings') render();
     } catch (err) {
       console.error('Error de sincronización:', err);
+      cloudProblem = cloudErrorMessage(err);
+      const code = String(err && err.code || '').toLowerCase();
+      cloudSetupRequired = code === 'pgrst205' || code === '42p01' || /could not find the table|relation .* does not exist/i.test(String(err && err.message || ''));
       updateCloudPill('error');
-      if (force) toast('No se pudo sincronizar. Revisa la conexión y la tabla de Supabase.', 'bad');
+      if (force) toast(cloudProblem, 'bad');
+      if (view === 'settings') render();
     } finally { cloudBusy = false; }
   }
 
   async function cloudLogin(form, mode) {
-    if (!supa) return toast('No está disponible el cliente de nube.', 'bad');
+    if (!supa) { cloudProblem = 'No está disponible el cliente de nube. Recarga la app y comprueba la conexión.'; render(); return toast(cloudProblem, 'bad'); }
     try {
       const fd = new FormData(form);
       const email = String(fd.get('email') || '').trim();
       const password = String(fd.get('password') || '');
+      cloudEmailDraft = email;
       const result = mode === 'signup'
         ? await supa.auth.signUp({ email, password })
         : await supa.auth.signInWithPassword({ email, password });
-      if (result.error) return toast(result.error.message || 'No se pudo iniciar sesión.', 'bad');
+      if (result.error) {
+        cloudProblem = cloudErrorMessage(result.error);
+        render();
+        return toast(cloudProblem, 'bad');
+      }
       if (!result.data.session && mode === 'signup') {
         cloudUser = null;
+        cloudProblem = 'Cuenta creada. Confirma el correo que Supabase envió antes de iniciar sesión.';
         updateCloudPill();
-        return toast('Cuenta creada. Revisa el correo para confirmar el acceso.', 'good');
+        render();
+        return toast(cloudProblem, 'good');
       }
+      if (!result.data.session) {
+        cloudUser = null;
+        cloudProblem = 'Supabase no devolvió una sesión. Confirma el correo de la cuenta y vuelve a intentarlo.';
+        render();
+        return toast(cloudProblem, 'bad');
+      }
+      cloudProblem = '';
       cloudUser = result.data && result.data.user ? result.data.user : null;
       updateCloudPill();
       await syncCloud(true);
       render();
-    } catch (err) { toast(err.message || 'No se pudo conectar con la nube.', 'bad'); }
+    } catch (err) { cloudProblem = cloudErrorMessage(err); render(); toast(cloudProblem, 'bad'); }
   }
   async function cloudLogout() {
     if (supa) await supa.auth.signOut();
-    cloudUser = null; updateCloudPill(); render(); toast('Sesión cerrada. Tus datos locales siguen disponibles.');
+    cloudUser = null; cloudProblem = ''; updateCloudPill(); render(); toast('Sesión cerrada. Tus datos locales siguen disponibles.');
   }
 
   function toBase64Utf8(content) {
@@ -1006,6 +1089,7 @@
     if (action === 'restore') { $('#restore-input').click(); return; }
     if (action === 'export-all') { exportAll(); return; }
     if (action === 'export-report') { exportReport(); return; }
+    if (action === 'cloud-setup') { download('gestion-clientes-supabase-setup.sql', CLOUD_SETUP_SQL, 'text/plain;charset=utf-8'); toast('Descargué el SQL. Ejecútalo en el Editor SQL de Supabase.', 'good'); return; }
     if (action === 'print') { printPage(); return; }
     if (action === 'cloud-sync') { syncCloud(true); return; }
     if (action === 'cloud-logout') { cloudLogout(); return; }
