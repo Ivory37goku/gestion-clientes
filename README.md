@@ -1,8 +1,9 @@
 # Gestión Clientes
 
-Aplicación independiente para organizar la actividad comercial y operativa de
-una empresa. Este repositorio tiene su propia PWA, APK Android y aplicación para
-Windows; no modifica ni comparte los datos de Control Laboral.
+Aplicación independiente para organizar la actividad comercial, las operaciones
+y la postventa de una empresa. Este repositorio tiene su propia PWA, APK Android
+y aplicación para Windows. Puede usar la misma cuenta de Supabase que Control
+Laboral, pero conserva sus registros en una tabla separada.
 
 ## Qué incluye
 
@@ -11,7 +12,9 @@ Windows; no modifica ni comparte los datos de Control Laboral.
 - Clientes convertibles desde un lead y con varias obras asociadas.
 - Obras con fechas, presupuesto, estado, avance y responsable.
 - Tareas por obra o cliente, con prioridades y vencimientos.
+- Vistas de Mi día, incidencias, mantenimiento y checklists sobre las tareas existentes.
 - Agenda de visitas, citas, tareas y seguimientos.
+- Panel operativo con alertas, actividad reciente, pipeline y accesos rápidos.
 - Presupuestos detallados con horas, tarifas, desplazamientos y materiales; cálculo e impresión/PDF con IGIC.
 - Facturas, vencimientos, pagos parciales y saldo pendiente.
 - Gastos por obra, enlaces a documentos, equipo e informes.
@@ -50,12 +53,12 @@ El workflow de Windows adjunta ambos EXE como artifacts de GitHub Actions.
 
 ## Sincronización en la nube
 
-En Ajustes y equipo → Datos y nube, confirma el correo de la cuenta y luego
-inicia sesión. Si falta la tabla, descarga el SQL desde esa pantalla y ejecútalo
-en el Editor SQL del proyecto Supabase. La app utiliza
-supabase-config.js y guarda todo en la tabla gestion_clientes, protegida por RLS.
-La tabla, la clave de sesión y el almacenamiento local de Gestión Clientes son
-independientes de Control Laboral.
+En Ajustes → Datos y nube, usa el mismo correo y contraseña que en Control
+Laboral. Descarga el SQL compartido desde esa pantalla y ejecútalo una vez en el
+Editor SQL del proyecto Supabase. El script prepara `ivory37_sync` para Control
+Laboral y `gestion_clientes` para esta app, con acceso privado por usuario. La
+información de las dos aplicaciones permanece separada; solo comparten el acceso.
+Las dos siguen guardando cambios localmente si no hay conexión.
 
 Las invitaciones y confirmaciones de correo de Supabase dependen de las URL
 permitidas en Authentication → URL Configuration. Añade la dirección de esta

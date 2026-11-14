@@ -3,34 +3,102 @@
 
   const KEY = 'gestion_clientes_data_v1';
   const CLOUD_TABLE = 'gestion_clientes';
-  const CLOUD_SETUP_SQL = `-- Gestión Clientes: tabla privada de sincronización.
+  const CLOUD_SETUP_SQL = String.raw`-- IVORY37: instalación idempotente del proyecto Supabase compartido.
+-- Control Laboral y Gestión Clientes usan el mismo inicio de sesión,
+-- pero guardan sus datos en tablas distintas y privadas por usuario.
+-- Ejecutar una vez (o volver a ejecutar sin borrar los datos existentes)
+-- en Supabase → SQL Editor.
+
+begin;
+
+-- Control Laboral: conserva el esquema y los datos actuales.
+create table if not exists public.ivory37_sync (
+  user_id uuid primary key references auth.users (id) on delete cascade,
+  payload jsonb not null default '{"jornadas":[],"viajes":[],"pagos":[],"ajustes":[]}'::jsonb,
+  revision bigint not null default 1,
+  updated_at timestamptz not null default now()
+);
+alter table public.ivory37_sync add column if not exists payload jsonb not null default '{"jornadas":[],"viajes":[],"pagos":[],"ajustes":[]}'::jsonb;
+alter table public.ivory37_sync add column if not exists revision bigint not null default 1;
+alter table public.ivory37_sync add column if not exists updated_at timestamptz not null default now();
+alter table public.ivory37_sync enable row level security;
+revoke all on table public.ivory37_sync from public, anon, authenticated;
+grant select, insert, update on table public.ivory37_sync to authenticated;
+
+drop policy if exists "Users can read their own IVORY37 data" on public.ivory37_sync;
+drop policy if exists "Users can create their own IVORY37 data" on public.ivory37_sync;
+drop policy if exists "Users can update their own IVORY37 data" on public.ivory37_sync;
+create policy "Users can read their own IVORY37 data" on public.ivory37_sync
+  for select to authenticated using ((select auth.uid()) = user_id);
+create policy "Users can create their own IVORY37 data" on public.ivory37_sync
+  for insert to authenticated with check ((select auth.uid()) = user_id);
+create policy "Users can update their own IVORY37 data" on public.ivory37_sync
+  for update to authenticated using ((select auth.uid()) = user_id)
+  with check ((select auth.uid()) = user_id);
+
+create or replace function public.ivory37_sync_touch_row()
+returns trigger
+language plpgsql
+set search_path = ''
+as $$
+begin
+  new.updated_at := now();
+  if tg_op = 'UPDATE' then
+    new.revision := old.revision + 1;
+  end if;
+  return new;
+end;
+$$;
+drop trigger if exists ivory37_sync_touch on public.ivory37_sync;
+create trigger ivory37_sync_touch before insert or update on public.ivory37_sync
+  for each row execute function public.ivory37_sync_touch_row();
+
+-- Gestión Clientes: cartera, leads, obras, presupuestos y tareas.
 create table if not exists public.gestion_clientes (
   user_id uuid primary key references auth.users (id) on delete cascade,
   payload jsonb not null default '{}'::jsonb,
   updated_at timestamptz not null default now()
 );
-
+alter table public.gestion_clientes add column if not exists payload jsonb not null default '{}'::jsonb;
+alter table public.gestion_clientes add column if not exists updated_at timestamptz not null default now();
 alter table public.gestion_clientes enable row level security;
+revoke all on table public.gestion_clientes from public, anon, authenticated;
+grant select, insert, update on table public.gestion_clientes to authenticated;
 
+-- Retira también las políticas de la primera versión de Gestión Clientes,
+-- para que no quede ninguna regla antigua más permisiva.
 drop policy if exists "Users can read their own company data" on public.gestion_clientes;
-create policy "Users can read their own company data"
-  on public.gestion_clientes for select
-  using (auth.uid() = user_id);
-
 drop policy if exists "Users can create their own company data" on public.gestion_clientes;
-create policy "Users can create their own company data"
-  on public.gestion_clientes for insert
-  with check (auth.uid() = user_id);
-
 drop policy if exists "Users can update their own company data" on public.gestion_clientes;
-create policy "Users can update their own company data"
-  on public.gestion_clientes for update
-  using (auth.uid() = user_id)
-  with check (auth.uid() = user_id);
+drop policy if exists "Users can read their own Gestión Clientes data" on public.gestion_clientes;
+drop policy if exists "Users can create their own Gestión Clientes data" on public.gestion_clientes;
+drop policy if exists "Users can update their own Gestión Clientes data" on public.gestion_clientes;
+create policy "Users can read their own Gestión Clientes data" on public.gestion_clientes
+  for select to authenticated using ((select auth.uid()) = user_id);
+create policy "Users can create their own Gestión Clientes data" on public.gestion_clientes
+  for insert to authenticated with check ((select auth.uid()) = user_id);
+create policy "Users can update their own Gestión Clientes data" on public.gestion_clientes
+  for update to authenticated using ((select auth.uid()) = user_id)
+  with check ((select auth.uid()) = user_id);
 
-grant select, insert, update on public.gestion_clientes to authenticated;`;
+-- Activa actualizaciones en tiempo real en ambas tablas si la publicación existe.
+do $$
+begin
+  if exists (select 1 from pg_publication where pubname = 'supabase_realtime') then
+    if not exists (select 1 from pg_publication_tables where pubname = 'supabase_realtime' and schemaname = 'public' and tablename = 'ivory37_sync') then
+      alter publication supabase_realtime add table public.ivory37_sync;
+    end if;
+    if not exists (select 1 from pg_publication_tables where pubname = 'supabase_realtime' and schemaname = 'public' and tablename = 'gestion_clientes') then
+      alter publication supabase_realtime add table public.gestion_clientes;
+    end if;
+  end if;
+end;
+$$;
+
+commit;`;
   const COLLECTIONS = ['leads', 'clients', 'works', 'tasks', 'quotes', 'invoices', 'payments', 'expenses', 'events', 'documents', 'team'];
-  const TITLES = { dashboard: 'Resumen', agenda: 'Agenda', leads: 'Leads', clients: 'Clientes', works: 'Obras', tasks: 'Tareas', quotes: 'Presupuestos', finance: 'Facturas y gastos', documents: 'Documentos', reports: 'Informes', settings: 'Ajustes y equipo' };
+  const TITLES = { dashboard: 'Resumen', myday: 'Mi día', agenda: 'Agenda', visits: 'Visitas', leads: 'Leads', clients: 'Clientes', works: 'Obras', tasks: 'Tareas', incidents: 'Incidencias', maintenance: 'Mantenimiento', checklists: 'Checklists', quotes: 'Presupuestos', finance: 'Facturas y gastos', documents: 'Documentos', reports: 'Informes', team: 'Equipo', settings: 'Ajustes' };
+  const TASK_CATEGORIES = ['General', 'Incidencia', 'Mantenimiento', 'Checklist'];
   const STATUS = {
     lead: ['Nuevo', 'Contactado', 'Cualificado', 'Propuesta enviada', 'Ganado', 'Perdido'],
     work: ['Pendiente', 'Planificada', 'En curso', 'Pausada', 'Terminada', 'Cancelada'],
@@ -63,6 +131,7 @@ grant select, insert, update on public.gestion_clientes to authenticated;`;
       if (source.company && num(source.company.taxRate) === 21) out.company.taxRate = 7;
     }
     COLLECTIONS.forEach(k => { out[k] = Array.isArray(source[k]) ? source[k].filter(x => x && x.id != null).map(x => Object.assign({}, x, { id: String(x.id) })) : []; });
+    out.tasks.forEach(task => { if (!TASK_CATEGORIES.includes(task.category)) task.category = 'General'; });
     ['quotes', 'invoices'].forEach(k => out[k].forEach(item => {
       if (item.taxRate == null) item.taxRate = out.company.taxRate;
       if (!item.taxName) item.taxName = num(item.taxRate) === 21 ? 'Impuesto anterior' : out.company.taxName;
@@ -270,12 +339,22 @@ grant select, insert, update on public.gestion_clientes to authenticated;`;
     $('#today-label').textContent = new Date().toLocaleDateString('es-ES', { weekday: 'short', day: 'numeric', month: 'short' });
     const overdue = data.tasks.filter(t => t.status !== 'Hecha' && t.due && t.due < today).length;
     const leadsDue = data.leads.filter(l => l.stage !== 'Ganado' && l.stage !== 'Perdido' && l.nextDate && l.nextDate <= today).length;
+    const todayCount = data.tasks.filter(t => t.status !== 'Hecha' && t.due === today).length + data.events.filter(e => e.date === today).length + data.leads.filter(l => !['Ganado', 'Perdido'].includes(l.stage) && l.nextDate === today).length;
+    const incidentsDue = data.tasks.filter(t => t.category === 'Incidencia' && t.status !== 'Hecha').length;
+    const visitsDue = data.events.filter(e => e.kind === 'Visita de obra' && e.date >= today).length;
     $('#tasks-count').textContent = overdue ? String(overdue) : '';
     $('#leads-count').textContent = leadsDue ? String(leadsDue) : '';
     $('#agenda-count').textContent = String(upcomingCount() || '');
+    $('#myday-count').textContent = String(todayCount || '');
+    $('#incidents-count').textContent = String(incidentsDue || '');
+    $('#visits-count').textContent = String(visitsDue || '');
     const root = $('#view-root');
     root.innerHTML = view === 'dashboard' ? renderDashboard()
+      : view === 'myday' ? renderMyDay()
       : view === 'agenda' ? renderAgenda()
+      : view === 'visits' ? renderVisits()
+      : view === 'team' ? renderTeam()
+      : ['incidents', 'maintenance', 'checklists'].includes(view) ? renderTaskCategory(view)
       : view === 'settings' ? renderSettings()
       : view === 'reports' ? renderReports()
       : view === 'finance' ? renderFinance()
@@ -289,9 +368,9 @@ grant select, insert, update on public.gestion_clientes to authenticated;`;
   function btn(label, action, type, extra) {
     return '<button class="btn ' + (type || '') + '" data-action="' + esc(action) + '"' + (extra || '') + '>' + label + '</button>';
   }
-  function newBtn(type, label) { return btn('<span>＋</span>' + esc(label), 'new', 'btn-primary', ' data-type="' + type + '"'); }
-  function empty(title, copy, type, label) {
-    return '<div class="empty"><strong>' + esc(title) + '</strong>' + esc(copy) + (type ? newBtn(type, label || 'Crear primero') : '') + '</div>';
+  function newBtn(type, label, attributes) { return btn('<span>＋</span>' + esc(label), 'new', 'btn-primary', ' data-type="' + type + '"' + (attributes || '')); }
+  function empty(title, copy, type, label, attributes) {
+    return '<div class="empty"><strong>' + esc(title) + '</strong>' + esc(copy) + (type ? newBtn(type, label || 'Crear primero', attributes) : '') + '</div>';
   }
   function card(title, content, sub, action) {
     return '<section class="card"><div class="card-head"><div><h2>' + esc(title) + '</h2>' + (sub ? '<p>' + esc(sub) + '</p>' : '') + '</div>' + (action || '') + '</div>' + content + '</section>';
@@ -315,16 +394,86 @@ grant select, insert, update on public.gestion_clientes to authenticated;`;
       return '<div class="pipe-step"><div class="pipe-label">' + esc(stage) + '</div><div class="pipe-value">' + subset.length + '</div><div class="pipe-bar"><i style="width:' + Math.round(subset.length / max * 100) + '%"></i></div></div>';
     }).join('');
     const setup = !data.company.name ? '<section class="setup-card"><h2>Deja lista tu empresa</h2><p>Completa los datos básicos y añade tu primer contacto para empezar.</p><div class="setup-steps"><span class="setup-step">1. Configura la empresa</span><span class="setup-step">2. Añade un lead o cliente</span><span class="setup-step">3. Crea una obra y sus tareas</span></div><div style="margin-top:11px">' + btn('Configurar empresa', 'settings-tab', 'btn-primary', ' data-tab="empresa"') + '</div></section>' : '';
-    const hero = '<section class="hero"><div class="hero-main"><p class="eyebrow">' + esc(new Date().toLocaleDateString('es-ES', { weekday: 'long', day: 'numeric', month: 'long' })) + '</p><h1>' + (data.company.name ? 'Hola, <span>' + esc(data.company.owner || data.company.name) + '</span>' : 'Tu empresa, <span>en orden.</span>') + '</h1><p>Un vistazo claro a las oportunidades, las obras y los compromisos que mueven el negocio.</p></div>' + dashboardFocus() + '<div class="hero-actions">' + newBtn('lead', 'Nuevo lead') + newBtn('client', 'Nuevo cliente') + newBtn('work', 'Nueva obra') + newBtn('task', 'Nueva tarea') + '</div></section>';
+    const hero = '<section class="hero dashboard-hero"><div class="hero-main"><p class="eyebrow">PANEL DE CONTROL · ' + esc(new Date().toLocaleDateString('es-ES', { weekday: 'long', day: 'numeric', month: 'long' })) + '</p><h1>' + (data.company.name ? 'Bienvenido, <span>' + esc(data.company.owner || data.company.name) + '</span>' : 'Tu negocio, <span>bajo control.</span>') + '</h1><p>Clientes, obras y equipo en un mismo sitio. Aquí tienes lo que requiere atención y el estado actual del negocio.</p></div>' + dashboardFocus() + '<div class="hero-actions">' + newBtn('lead', 'Nuevo lead') + newBtn('client', 'Nuevo cliente') + newBtn('work', 'Nueva obra') + newBtn('quote', 'Nuevo presupuesto') + '</div></section>';
     const kpis = '<div class="kpis">' +
-      kpi('Leads abiertos', openLeads.length, money(weighted) + ' en oportunidades', '✳') +
-      kpi('Obras en curso', activeWorks, data.works.length + ' obras en total', '▦') +
-      kpi('Por cobrar', money(outstandingTotal), data.invoices.filter(i => outstanding(i) > 0).length + ' facturas pendientes', '€') +
-      kpi('Tareas pendientes', data.tasks.filter(t => t.status !== 'Hecha').length, dueTasks.filter(t => t.due < today).length + ' fuera de plazo', '☷') + '</div>';
+      kpi('Oportunidades abiertas', openLeads.length, money(weighted) + ' valor ponderado', '✳') +
+      kpi('Obras activas', activeWorks, data.works.length + ' obras registradas', '▦') +
+      kpi('Pendiente de cobro', money(outstandingTotal), data.invoices.filter(i => outstanding(i) > 0).length + ' facturas abiertas', '€') +
+      kpi('Tareas abiertas', data.tasks.filter(t => t.status !== 'Hecha').length, dueTasks.filter(t => t.due && t.due < today).length + ' vencidas', '☷') + '</div>';
     const tasksContent = dueTasks.length ? '<div class="list">' + dueTasks.map(t => row(t.title, (workName(t.workId) || selected(data.clients, t.clientId) || 'Sin obra asignada') + ' · vence ' + dateFmt(t.due), t.status, '<span class="row-date">' + esc(dateFmt(t.due, { day: '2-digit', month: 'short' })) + '</span>', '', t.id, 'task')).join('') + '</div>' : empty('Sin tareas próximas', 'Crea tareas y asígnalas a una obra para tenerlas a mano.', 'task', 'Crear tarea');
     const leadContent = followups.length ? '<div class="list">' + followups.map(l => row(l.name || l.company, (l.company && l.name ? l.company + ' · ' : '') + 'seguimiento ' + dateFmt(l.nextDate), l.stage, '<span class="row-amount">' + esc(money(l.value)) + '</span>', '', l.id, 'lead')).join('') + '</div>' : empty('Sin seguimientos programados', 'Añade una fecha de seguimiento a un lead.', 'lead', 'Añadir lead');
     const worksContent = workRows.length ? '<div class="list">' + workRows.map(w => row(w.name, selected(data.clients, w.clientId) + (w.end ? ' · entrega ' + dateFmt(w.end) : ''), w.status, '<span class="row-amount">' + esc(money(w.budget)) + '</span>', '', w.id, 'work')).join('') + '</div>' : empty('Aún no hay obras', 'Las obras de tu empresa aparecerán aquí.', 'work', 'Crear obra');
-    return setup + hero + kpis + card('Embudo comercial', pipeline, openLeads.length + ' oportunidades activas', '<button class="text-link" data-view="leads">Ver leads →</button>') + '<div class="grid-2" style="margin-top:14px">' + card('Tareas por delante', tasksContent, 'Fechas límite más próximas', '<button class="text-link" data-view="tasks">Todas →</button>') + card('Seguimientos comerciales', leadContent, 'No dejes enfriar una oportunidad', '<button class="text-link" data-view="leads">Todos →</button>') + '</div><div style="margin-top:14px">' + card('Obras activas', worksContent, 'Proyectos que están en marcha', '<button class="text-link" data-view="works">Ver obras →</button>') + '</div>';
+    const todayPanel = renderAttention();
+    const activity = renderRecentActivity();
+    return setup + hero + kpis + todayPanel + '<div class="dashboard-columns"><div class="dashboard-main">' + card('Embudo comercial', '<div class="pipeline">' + pipeline + '</div>', openLeads.length + ' oportunidades activas', '<button class="text-link" data-view="leads">Abrir CRM →</button>') + '<div class="grid-2" style="margin-top:14px">' + card('Tareas por delante', tasksContent, 'Próximos vencimientos', '<button class="text-link" data-view="tasks">Ver todas →</button>') + card('Obras en marcha', worksContent, 'Planificación y avance', '<button class="text-link" data-view="works">Ver todas →</button>') + '</div></div><div class="dashboard-aside">' + activity + card('Seguimientos comerciales', leadContent, 'Próximas llamadas y oportunidades', '<button class="text-link" data-view="leads">Ver leads →</button>') + '</div></div>';
+  }
+
+  function renderAttention() {
+    const tasks = data.tasks.filter(t => t.status !== 'Hecha' && t.due && t.due <= today).map(t => ({ type: 'task', id: t.id, rank: t.due, title: t.title, detail: (t.due < today ? 'Tarea vencida' : 'Tarea para hoy') + ' · ' + (workName(t.workId) || selected(data.clients, t.clientId) || 'Sin obra') }));
+    const leads = data.leads.filter(l => !['Ganado', 'Perdido'].includes(l.stage) && l.nextDate && l.nextDate <= today).map(l => ({ type: 'lead', id: l.id, rank: l.nextDate, title: l.name || l.company || 'Seguimiento comercial', detail: (l.nextDate < today ? 'Seguimiento atrasado' : 'Seguimiento para hoy') + (l.company && l.name ? ' · ' + l.company : '') }));
+    const invoices = data.invoices.filter(i => outstanding(i) > 0 && i.due && i.due < today).map(i => ({ type: 'invoice', id: i.id, rank: i.due, title: i.title || 'Factura ' + i.number, detail: 'Factura vencida · ' + money(outstanding(i)) + ' pendiente' }));
+    const dueWorks = data.works.filter(w => !['Terminada', 'Cancelada'].includes(w.status) && w.end && w.end >= today && w.end <= dateKey(new Date(Date.now() + 7 * 86400000))).map(w => ({ type: 'work', id: w.id, rank: w.end, title: w.name, detail: 'Fecha de entrega · ' + dateFmt(w.end) }));
+    const items = tasks.concat(leads, invoices, dueWorks).sort((a, b) => a.rank.localeCompare(b.rank)).slice(0, 5);
+    const body = items.length ? '<div class="attention-list">' + items.map((x, i) => '<button class="attention-item" data-action="detail" data-type="' + esc(x.type) + '" data-id="' + esc(x.id) + '"><span class="attention-index">' + String(i + 1).padStart(2, '0') + '</span><span class="attention-copy"><strong>' + esc(x.title) + '</strong><small>' + esc(x.detail) + '</small></span><span class="attention-arrow">↗</span></button>').join('') + '</div>' : '<div class="attention-clear"><span class="attention-check">✓</span><div><strong>Todo al día</strong><p>No hay tareas vencidas, seguimientos atrasados ni entregas próximas.</p></div><button type="button" class="text-link" data-view="myday">Ver mi día →</button></div>';
+    return card('Lo que pide atención hoy', body, items.length ? items.length + ' asuntos necesitan seguimiento' : 'Sin alertas pendientes', '<button class="text-link" data-view="myday">Abrir mi día →</button>');
+  }
+
+  function renderRecentActivity() {
+    const sources = [
+      ['lead', 'leads', 'Lead'], ['client', 'clients', 'Cliente'], ['work', 'works', 'Obra'], ['task', 'tasks', 'Tarea'],
+      ['quote', 'quotes', 'Presupuesto'], ['invoice', 'invoices', 'Factura'], ['event', 'events', 'Cita']
+    ];
+    const records = sources.flatMap(([type, collection, label]) => data[collection].map(item => ({ type, label, item, stamp: item.updatedAt || item.createdAt || item.date || '' })))
+      .filter(x => x.stamp).sort((a, b) => String(b.stamp).localeCompare(String(a.stamp))).slice(0, 5);
+    const content = records.length ? '<div class="activity-list">' + records.map(x => {
+      const title = x.item.title || x.item.name || x.item.company || x.item.number || x.label;
+      const state = x.item.stage || x.item.status || x.item.kind || 'Actualizado';
+      return '<button class="activity-item" data-action="detail" data-type="' + x.type + '" data-id="' + esc(x.item.id) + '"><span class="activity-mark">' + esc(x.label.slice(0, 1)) + '</span><span class="activity-copy"><strong>' + esc(title) + '</strong><small>' + esc(x.label + ' · ' + state) + '</small></span><time>' + esc(dateFmt(x.stamp, { day: '2-digit', month: 'short' })) + '</time></button>';
+    }).join('') + '</div>' : '<div class="activity-empty"><strong>Tu actividad aparecerá aquí</strong><p>Al crear o actualizar leads, clientes, obras y presupuestos podrás seguir los últimos movimientos.</p></div>';
+    return card('Actividad reciente', content, 'Últimos registros actualizados', '<button class="text-link" data-view="reports">Ver informes →</button>');
+  }
+
+  function renderMyDay() {
+    const tasks = data.tasks.filter(t => t.status !== 'Hecha' && t.due && t.due <= today).sort((a, b) => a.due.localeCompare(b.due));
+    const events = data.events.filter(e => e.date === today).sort((a, b) => (a.time || '').localeCompare(b.time || ''));
+    const leads = data.leads.filter(l => !['Ganado', 'Perdido'].includes(l.stage) && l.nextDate && l.nextDate <= today).sort((a, b) => a.nextDate.localeCompare(b.nextDate));
+    const upcoming = data.tasks.filter(t => t.status !== 'Hecha' && t.due > today && t.due <= dateKey(new Date(Date.now() + 7 * 86400000))).sort((a, b) => a.due.localeCompare(b.due)).slice(0, 6);
+    const items = tasks.map(t => ({ type: 'task', id: t.id, time: t.due, when: dateFmt(t.due), title: t.title, detail: (t.due < today ? 'Vencida' : 'Hoy') + ' · ' + (workName(t.workId) || selected(data.clients, t.clientId) || 'Sin obra asignada'), status: t.status }))
+      .concat(events.map(e => ({ type: 'event', id: e.id, time: e.date + (e.time || '23:59'), when: e.time || 'Todo el día', title: e.title, detail: [e.kind, workName(e.workId) || selected(data.clients, e.clientId)].filter(Boolean).join(' · '), status: e.kind || 'Cita' })))
+      .concat(leads.map(l => ({ type: 'lead', id: l.id, time: l.nextDate, when: dateFmt(l.nextDate), title: l.name || l.company || 'Seguimiento comercial', detail: 'Seguimiento ' + (l.nextDate < today ? 'atrasado' : 'hoy') + (l.company && l.name ? ' · ' + l.company : ''), status: l.stage })))
+      .sort((a, b) => String(a.time).localeCompare(String(b.time)));
+    const todayContent = items.length ? '<div class="list">' + items.map(x => row(x.title, x.detail, x.status, '<span class="row-date">' + esc(x.when) + '</span>', '', x.id, x.type)).join('') + '</div>' : empty('No tienes asuntos para hoy', 'Las tareas vencidas, citas de hoy y seguimientos pendientes aparecerán en esta lista.', 'task', 'Añadir tarea');
+    const upcomingContent = upcoming.length ? '<div class="list">' + upcoming.map(t => row(t.title, workName(t.workId) || selected(data.clients, t.clientId) || 'Sin obra asignada', t.status, '<span class="row-date">' + esc(dateFmt(t.due)) + '</span>', '', t.id, 'task')).join('') + '</div>' : '<div class="activity-empty"><strong>Sin tareas para los próximos siete días</strong><p>Cuando añadas fechas límite, las verás aquí.</p></div>';
+    return header('ORGANIZACIÓN PERSONAL', 'Mi día', 'Empieza por lo urgente y consulta después lo que viene en camino.', newBtn('task', 'Nueva tarea')) +
+      '<div class="kpis">' + kpi('Pendientes de hoy', items.length, tasks.filter(t => t.due < today).length + ' tareas vencidas', '◉') + kpi('Citas de hoy', events.length, 'visitas y reuniones', '◷') + kpi('Seguimientos', leads.length, 'leads que requieren respuesta', '✳') + kpi('Tareas esta semana', upcoming.length, 'próximos siete días', '☷') + '</div>' +
+      '<div class="grid-2 day-grid">' + card('Hoy · ' + dateFmt(today, { weekday: 'long', day: 'numeric', month: 'long' }), todayContent, items.length ? 'Ordenado por fecha y hora' : 'Todo despejado') + card('Próximos siete días', upcomingContent, 'Planifica con margen', '<button class="text-link" data-view="agenda">Abrir agenda →</button>') + '</div>';
+  }
+
+  function renderVisits() {
+    const visits = data.events.filter(e => e.kind === 'Visita de obra').slice().sort((a, b) => String(a.date + (a.time || '')).localeCompare(String(b.date + (b.time || ''))));
+    const list = visits.length ? '<div class="list">' + visits.map(e => '<div class="row-item visit-row"><span class="visit-date"><b>' + esc(dateFmt(e.date, { day: '2-digit' })) + '</b><small>' + esc(dateFmt(e.date, { month: 'short' })) + '</small></span><div class="row-main" data-action="detail" data-type="event" data-id="' + esc(e.id) + '"><div class="row-title">' + esc(e.title) + badge(e.date < today ? 'Realizada' : e.date === today ? 'Hoy' : 'Programada') + '</div><div class="row-sub">' + esc([e.time, workName(e.workId), selected(data.clients, e.clientId), e.owner ? teamName(e.owner) : ''].filter(Boolean).join(' · ') || 'Sin obra ni cliente asociados') + '</div></div><div class="row-end"><button type="button" class="tiny-btn" data-action="edit" data-type="event" data-id="' + esc(e.id) + '">Editar</button></div></div>').join('') + '</div>' : empty('Aún no hay visitas programadas', 'Añade una visita desde aquí y se vinculará a la agenda, el cliente y la obra.', 'event', 'Programar visita');
+    const next = visits.filter(e => e.date >= today).length;
+    return header('TRABAJO EN CAMPO', 'Visitas', 'Planifica visitas de obra y consulta rápidamente a quién y dónde tienes que ir.', newBtn('event', 'Programar visita', ' data-kind="Visita de obra"')) +
+      '<div class="kpis">' + kpi('Visitas próximas', next, 'incluye las de hoy', '⌖') + kpi('Obras activas', data.works.filter(w => w.status === 'En curso').length, 'con planificación en curso', '▦') + kpi('Equipo disponible', data.team.filter(p => p.active !== false).length, 'responsables registrados', '♧') + kpi('Clientes', data.clients.length, 'contactos en cartera', '♙') + '</div>' + card('Agenda de visitas', list, 'Cada visita queda guardada también en la agenda general');
+  }
+
+  function renderTaskCategory(page) {
+    const config = {
+      incidents: { category: 'Incidencia', title: 'Incidencias', eyebrow: 'ATENCIÓN AL CLIENTE', description: 'Registra avisos, garantías y problemas pendientes de resolver.', singular: 'incidencia' },
+      maintenance: { category: 'Mantenimiento', title: 'Mantenimiento', eyebrow: 'POSTVENTA', description: 'Organiza revisiones preventivas y trabajos de mantenimiento.', singular: 'mantenimiento' },
+      checklists: { category: 'Checklist', title: 'Checklists', eyebrow: 'CONTROL DE CALIDAD', description: 'Prepara listas de comprobación para que ninguna entrega se quede a medias.', singular: 'checklist' }
+    }[page];
+    const tasks = data.tasks.filter(t => t.category === config.category).filter(t => !searchText || normalizeSearchText(JSON.stringify(t)).includes(normalizeSearchText(searchText))).slice().sort((a, b) => (a.status === 'Hecha') - (b.status === 'Hecha') || (a.due || '9999').localeCompare(b.due || '9999'));
+    const actions = newBtn('task', 'Nueva ' + config.singular, ' data-category="' + esc(config.category) + '"');
+    const toolbar = '<div class="toolbar"><div class="search"><input id="search-input" type="search" value="' + esc(searchText) + '" placeholder="Buscar ' + config.title.toLocaleLowerCase('es') + '…" aria-label="Buscar ' + config.title + '"></div><span class="muted small">' + tasks.length + (tasks.length === 1 ? ' registro' : ' registros') + '</span></div>';
+    const content = tasks.length ? '<div class="list">' + tasks.map(t => renderListRow('tasks', t)).join('') + '</div>' : empty(searchText ? 'No se encontraron resultados' : 'Todavía no hay ' + config.title.toLocaleLowerCase('es'), searchText ? 'Prueba con otra búsqueda.' : 'Crea el primero para organizar el seguimiento.', 'task', 'Crear ' + config.singular, ' data-category="' + esc(config.category) + '"');
+    return header(config.eyebrow, config.title, config.description, actions) + '<section class="card">' + toolbar + content + '</section>';
+  }
+
+  function renderTeam() {
+    const people = data.team.slice().sort((a, b) => (a.active === false) - (b.active === false) || String(a.name || '').localeCompare(String(b.name || ''), 'es'));
+    const list = people.length ? '<div class="team-grid">' + people.map(p => '<article class="team-card"><div class="team-card-top"><span class="team-avatar">' + esc((p.name || '?').trim().split(/\s+/).slice(0, 2).map(x => x[0]).join('').toUpperCase()) + '</span><span class="team-state ' + (p.active === false ? 'inactive' : '') + '">' + (p.active === false ? 'Inactivo' : 'Activo') + '</span></div><h3>' + esc(p.name) + '</h3><p>' + esc(p.role || 'Sin puesto indicado') + '</p><div class="team-contact">' + (p.phone ? '<a href="tel:' + esc(p.phone) + '">' + esc(p.phone) + '</a>' : '') + (p.email ? '<a href="mailto:' + esc(p.email) + '">' + esc(p.email) + '</a>' : '') + '</div><div class="team-card-actions"><button type="button" class="btn btn-sm" data-action="detail" data-type="team" data-id="' + esc(p.id) + '">Ver ficha</button><button type="button" class="btn btn-sm" data-action="edit" data-type="team" data-id="' + esc(p.id) + '">Editar</button></div></article>').join('') + '</div>' : empty('Aún no has añadido a tu equipo', 'Añade las personas que participan en las obras y asígnalas después a tareas y visitas.', 'team', 'Añadir persona');
+    return header('OPERACIONES', 'Equipo', 'Responsables y colaboradores de tu empresa.', newBtn('team', 'Añadir persona')) + '<div class="team-summary">' + kpi('Personas activas', people.filter(p => p.active !== false).length, 'disponibles para asignación', '♧') + kpi('Obras con responsable', new Set(data.works.filter(w => w.owner).map(w => w.owner)).size, 'responsables asignados', '▦') + kpi('Tareas asignadas', data.tasks.filter(t => t.owner && t.status !== 'Hecha').length, 'trabajos abiertos', '☷') + '</div>' + card('Personas y colaboradores', list, people.length + ' fichas de equipo');
   }
   function dashboardFocus() {
     const openTasks = data.tasks.filter(task => task.status !== 'Hecha').sort((a, b) => (a.due || '9999').localeCompare(b.due || '9999'));
@@ -380,7 +529,7 @@ grant select, insert, update on public.gestion_clientes to authenticated;`;
     const cfg = PAGE_CONFIG[key];
     if (!cfg) return renderDashboard();
     const headerActions = newBtn(cfg.type, 'Nuevo ' + cfg.singular);
-    const head = header(key === 'leads' ? 'VENTAS' : key === 'works' ? 'PROYECTOS' : key === 'tasks' ? 'ORGANIZACIÓN' : key === 'quotes' ? 'ADMINISTRACIÓN' : key === 'documents' ? 'ARCHIVO' : 'RELACIONES', cfg.title, cfg.sub, headerActions);
+    const head = header(key === 'leads' || key === 'quotes' ? 'COMERCIAL' : key === 'works' ? 'OPERACIONES' : key === 'tasks' ? 'ORGANIZACIÓN' : key === 'documents' ? 'ADMINISTRACIÓN' : 'RELACIONES', cfg.title, cfg.sub, headerActions);
     let items = data[cfg.collection].slice();
     const q = searchText.toLocaleLowerCase('es');
     if (q) items = items.filter(x => JSON.stringify(x).toLocaleLowerCase('es').includes(q));
@@ -401,7 +550,7 @@ grant select, insert, update on public.gestion_clientes to authenticated;`;
     }
     if (key === 'clients') return '<div class="row-item list-flow-row"><div class="row-main" data-action="detail" data-type="client" data-id="' + esc(x.id) + '"><div class="row-title">' + esc(x.company || x.name) + '</div><div class="row-sub">' + esc([x.name && x.company ? x.name : '', x.email, x.phone, data.works.filter(w => w.clientId === x.id).length + ' obras'].filter(Boolean).join(' · ')) + '</div></div><div class="row-end"><span class="row-date">' + esc(x.city || '') + '</span><button type="button" class="btn btn-sm" data-action="quick-new" data-type="work" data-client-id="' + esc(x.id) + '">＋ Crear obra</button></div></div>';
     if (key === 'works') return '<div class="row-item list-flow-row"><div class="row-main" data-action="detail" data-type="work" data-id="' + esc(x.id) + '"><div class="row-title">' + esc(x.name) + badge(x.status) + '</div><div class="row-sub">' + esc(selected(data.clients, x.clientId) + (x.address ? ' · ' + x.address : '') + (x.end ? ' · entrega ' + dateFmt(x.end) : '')) + '</div><div class="progress" style="margin-top:8px"><i style="width:' + Math.min(100, Math.max(0, num(x.progress))) + '%"></i></div></div><div class="row-end"><div class="row-value-block"><div class="row-amount">' + esc(money(x.budget)) + '</div><div class="row-date">' + esc(Math.round(num(x.progress)) + '% completado') + '</div></div><div class="row-quick-actions"><button type="button" class="btn btn-sm" data-action="quick-new" data-type="task" data-client-id="' + esc(x.clientId || '') + '" data-work-id="' + esc(x.id) + '">＋ Tarea</button><button type="button" class="btn btn-sm" data-action="quick-new" data-type="quote" data-client-id="' + esc(x.clientId || '') + '" data-work-id="' + esc(x.id) + '">Presupuesto</button></div></div></div>';
-    if (key === 'tasks') return '<div class="row-item"><button class="tiny-btn ' + (x.status === 'Hecha' ? '' : 'danger') + '" data-action="toggle-task" data-id="' + esc(x.id) + '" aria-label="' + (x.status === 'Hecha' ? 'Reabrir' : 'Marcar hecha') + '">' + (x.status === 'Hecha' ? '✓' : '○') + '</button><div class="row-main" data-action="detail" data-type="task" data-id="' + esc(x.id) + '"><div class="row-title">' + esc(x.title) + badge(x.status) + badge(x.priority || 'Media') + '</div><div class="row-sub">' + esc(workName(x.workId) || selected(data.clients, x.clientId) || 'Sin proyecto') + (x.owner ? ' · ' + teamName(x.owner) : '') + '</div></div><div class="row-end"><span class="row-date">' + esc(x.due ? 'Vence ' + dateFmt(x.due) : 'Sin fecha') + '</span></div></div>';
+    if (key === 'tasks') return '<div class="row-item"><button class="tiny-btn ' + (x.status === 'Hecha' ? '' : 'danger') + '" data-action="toggle-task" data-id="' + esc(x.id) + '" aria-label="' + (x.status === 'Hecha' ? 'Reabrir' : 'Marcar hecha') + '">' + (x.status === 'Hecha' ? '✓' : '○') + '</button><div class="row-main" data-action="detail" data-type="task" data-id="' + esc(x.id) + '"><div class="row-title">' + esc(x.title) + badge(x.status) + badge(x.category || 'General') + badge(x.priority || 'Media') + '</div><div class="row-sub">' + esc(workName(x.workId) || selected(data.clients, x.clientId) || 'Sin proyecto') + (x.owner ? ' · ' + teamName(x.owner) : '') + '</div></div><div class="row-end"><span class="row-date">' + esc(x.due ? 'Vence ' + dateFmt(x.due) : 'Sin fecha') + '</span></div></div>';
     if (key === 'quotes') return row(x.title || ('Presupuesto ' + x.number), selected(data.clients, x.clientId) + (x.workId ? ' · ' + workName(x.workId) : '') + (x.validUntil ? ' · válido hasta ' + dateFmt(x.validUntil) : ''), x.status, amountEnd(total(x), dateFmt(x.date)), '', x.id, 'quote');
     return '<div class="row-item" data-action="detail" data-type="document" data-id="' + esc(x.id) + '"><div class="row-main"><div class="row-title">' + esc(x.title) + badge(x.kind || 'Documento') + '</div><div class="row-sub">' + esc(workName(x.workId) || selected(data.clients, x.clientId) || 'Sin asociar') + (x.notes ? ' · ' + esc(x.notes) : '') + '</div></div><div class="row-end"><a class="document-link btn btn-sm" href="' + esc(safeHref(x.url)) + '" target="_blank" rel="noopener">Abrir ↗</a><div class="row-actions"><button class="tiny-btn" data-action="edit" data-type="document" data-id="' + esc(x.id) + '">Editar</button><button class="tiny-btn danger" data-action="delete" data-type="document" data-id="' + esc(x.id) + '">Eliminar</button></div></div></div>';
   }
@@ -464,7 +613,7 @@ grant select, insert, update on public.gestion_clientes to authenticated;`;
     const tabs = [['empresa', 'Empresa'], ['equipo', 'Equipo'], ['datos', 'Datos y nube']];
     const nav = '<div class="settings-tabs">' + tabs.map(x => '<button class="' + (settingsTab === x[0] ? 'active' : '') + '" data-action="settings-tab" data-tab="' + x[0] + '">' + x[1] + '</button>').join('') + '</div>';
     if (settingsTab === 'empresa') {
-      return header('PERSONALIZACIÓN', 'Ajustes y equipo', 'Configura los datos de tu negocio y cómo quieres trabajar.') + nav +
+      return header('PERSONALIZACIÓN', 'Ajustes', 'Configura los datos de tu negocio y cómo quieres trabajar.') + nav +
         '<section class="card"><div class="card-head"><div><h2>Datos de empresa</h2><p>Se usarán en la aplicación y los informes.</p></div></div><form id="company-form"><div class="fields">' +
         settingsField('name', 'Nombre comercial', data.company.name, 'text', 'full', 'Mi empresa') +
         settingsField('taxId', 'CIF / NIF', data.company.taxId, 'text') +
@@ -479,21 +628,21 @@ grant select, insert, update on public.gestion_clientes to authenticated;`;
     }
     if (settingsTab === 'equipo') {
       const list = data.team.length ? '<div class="list">' + data.team.map(x => row(x.name, [x.role, x.email, x.phone].filter(Boolean).join(' · '), x.active === false ? 'Inactivo' : 'Activo', '<div class="row-actions"><button class="tiny-btn" data-action="edit" data-type="team" data-id="' + esc(x.id) + '">Editar</button><button class="tiny-btn danger" data-action="delete" data-type="team" data-id="' + esc(x.id) + '">Eliminar</button></div>', '', x.id, 'team')).join('') + '</div>' : empty('Añade a tu equipo', 'Después podrás asignar responsables a las obras y tareas.', 'team', 'Añadir persona');
-      return header('PERSONAS', 'Ajustes y equipo', 'Organiza responsables y asignaciones.') + nav + card('Equipo', list, 'Personas que pueden aparecer como responsables', newBtn('team', 'Añadir persona'));
+      return header('PERSONAS', 'Ajustes', 'Organiza responsables y asignaciones.') + nav + card('Equipo', list, 'Personas que pueden aparecer como responsables', newBtn('team', 'Añadir persona'));
     }
     const cloudConfig = window.GESTION_CLIENTES_SUPABASE_CONFIG || {};
     let projectRef = '';
     try { projectRef = new URL(cloudConfig.url || '').hostname.split('.')[0]; } catch (_) {}
     const sqlEditorUrl = projectRef ? 'https://supabase.com/dashboard/project/' + encodeURIComponent(projectRef) + '/sql/new' : 'https://supabase.com/dashboard';
-    const setupActions = '<div class="cloud-setup-actions"><button type="button" class="btn btn-sm" data-action="cloud-setup">Descargar SQL de configuración</button><a class="btn btn-sm" href="' + esc(sqlEditorUrl) + '" target="_blank" rel="noopener">Abrir Editor SQL ↗</a></div>';
+    const setupActions = '<div class="cloud-setup-actions"><button type="button" class="btn btn-sm" data-action="cloud-setup">Descargar SQL compartido para las dos apps</button><a class="btn btn-sm" href="' + esc(sqlEditorUrl) + '" target="_blank" rel="noopener">Abrir Editor SQL ↗</a></div>';
     const cloudWarning = cloudProblem ? '<div class="cloud-alert" role="alert"><strong>Hay que revisar la conexión</strong><p>' + esc(cloudProblem) + '</p>' + (cloudSetupRequired ? setupActions : '') + '</div>' : '';
-    const cloudSetupHelp = !cloudUser && !cloudProblem ? '<div class="cloud-setup-help"><strong>Si es la primera vez</strong><ol><li>Confirma el correo que Supabase envió para activar tu cuenta.</li><li>Si la sincronización avisa que falta la tabla, ejecuta una vez el SQL en el proyecto.</li></ol>' + setupActions + '</div>' : '';
-    const cloudPanel = '<div class="card"><div class="card-head"><div><h2>Sincronización privada</h2><p>Usa tu cuenta para mantener una copia actualizada entre dispositivos.</p></div><span class="badge ' + (cloudProblem ? 'yellow' : cloudUser ? 'green' : '') + '">' + esc(cloudUser ? cloudUser.email : cloudProblem ? 'Requiere atención' : 'Desconectado') + '</span></div>' + cloudWarning +
+    const cloudSetupHelp = !cloudUser && !cloudProblem ? '<div class="cloud-setup-help"><strong>Conecta las dos aplicaciones</strong><ol><li>Usa el mismo correo y contraseña en Gestión Clientes y Control Laboral.</li><li>Ejecuta una vez el SQL compartido para preparar las dos tablas privadas.</li><li>Confirma el correo si Supabase te lo solicita.</li></ol>' + setupActions + '</div>' : '';
+    const cloudPanel = '<div class="card"><div class="card-head"><div><h2>Sincronización privada</h2><p>La cuenta sirve en ambas apps; cada una conserva sus datos en una tabla independiente.</p></div><span class="badge ' + (cloudProblem ? 'yellow' : cloudUser ? 'green' : '') + '">' + esc(cloudUser ? cloudUser.email : cloudProblem ? 'Requiere atención' : 'Desconectado') + '</span></div>' + cloudWarning +
       (cloudUser ? '<p class="modal-note">Los cambios se sincronizan en segundo plano cuando hay conexión. Las copias locales siguen disponibles sin internet.</p><div class="head-actions"><button class="btn btn-primary" data-action="cloud-sync">Sincronizar ahora</button><button class="btn" data-action="cloud-logout">Cerrar sesión</button></div>' :
-        '<p class="modal-note">El almacenamiento y las copias JSON funcionan sin cuenta. Para sincronizar, inicia sesión con la misma cuenta del teléfono.</p><form id="cloud-form"><div class="fields"><div class="field"><label for="cloud-email">Correo</label><input id="cloud-email" name="email" type="email" value="' + esc(cloudEmailDraft) + '" autocomplete="username" required></div><div class="field"><label for="cloud-password">Contraseña</label><input id="cloud-password" name="password" type="password" autocomplete="current-password" minlength="6" required><span class="hint">El acceso admite la contraseña de 6 caracteres que ya creaste.</span></div></div><div class="head-actions" style="margin-top:12px"><button class="btn btn-primary" type="submit" data-cloud-mode="login">Iniciar sesión</button><button class="btn" type="submit" data-cloud-mode="signup">Crear cuenta</button></div></form>') +
+        '<p class="modal-note">El almacenamiento y las copias JSON funcionan sin cuenta. Para sincronizar entre móvil y ordenador, inicia sesión con la misma cuenta en las dos aplicaciones.</p><form id="cloud-form"><div class="fields"><div class="field"><label for="cloud-email">Correo</label><input id="cloud-email" name="email" type="email" value="' + esc(cloudEmailDraft) + '" autocomplete="username" required></div><div class="field"><label for="cloud-password">Contraseña</label><input id="cloud-password" name="password" type="password" autocomplete="current-password" minlength="6" required><span class="hint">El acceso admite la contraseña de 6 caracteres que ya creaste.</span></div></div><div class="head-actions" style="margin-top:12px"><button class="btn btn-primary" type="submit" data-cloud-mode="login">Iniciar sesión</button><button class="btn" type="submit" data-cloud-mode="signup">Crear cuenta</button></div></form>') +
       cloudSetupHelp + '</div>';
     const dataPanel = '<div class="card"><div class="card-head"><div><h2>Copias y exportaciones</h2><p>Conserva tus datos o llévalos a otra instalación.</p></div></div><div class="head-actions"><button class="btn btn-primary" data-action="backup">Descargar copia JSON</button><button class="btn" data-action="restore">Restaurar copia</button><button class="btn" data-action="export-all">Exportar registros CSV</button><input id="restore-input" type="file" accept="application/json,.json" hidden></div><p class="modal-note" style="margin-top:12px">La copia JSON incluye todos los registros, relaciones, configuración e historial de cobros.</p></div>';
-    return header('DATOS', 'Ajustes y equipo', 'Copias de seguridad y sincronización en tus dispositivos.') + nav + '<div class="stack">' + dataPanel + cloudPanel + card('Almacenamiento', '<div class="row-item"><div class="row-main"><div class="row-title">Datos locales</div><div class="row-sub">Guardados automáticamente en este dispositivo.</div></div><span class="badge green">Activo</span></div>', 'Sin conexión disponible') + '</div>';
+    return header('DATOS', 'Ajustes', 'Copias de seguridad y sincronización en tus dispositivos.') + nav + '<div class="stack">' + dataPanel + cloudPanel + card('Almacenamiento', '<div class="row-item"><div class="row-main"><div class="row-title">Datos locales</div><div class="row-sub">Guardados automáticamente en este dispositivo.</div></div><span class="badge green">Activo</span></div>', 'Sin conexión disponible') + '</div>';
   }
   function settingsField(name, label, value, type, size, placeholder) {
     return '<div class="field ' + (size || '') + '"><label for="co-' + name + '">' + esc(label) + '</label><input id="co-' + name + '" name="' + name + '" type="' + (type || 'text') + '" value="' + esc(value == null ? '' : value) + '"' + (placeholder ? ' placeholder="' + esc(placeholder) + '"' : '') + '></div>';
@@ -610,7 +759,7 @@ grant select, insert, update on public.gestion_clientes to authenticated;`;
     if (type === 'lead') { add('Empresa', item.company); add('Estado', item.stage); add('Teléfono', item.phone); add('Correo', item.email); add('Origen', item.source); add('Valor estimado', money(item.value)); add('Próximo seguimiento', dateFmt(item.nextDate)); add('Notas', item.notes); }
     if (type === 'client') { add('Contacto', item.name); add('CIF / NIF', item.taxId); add('Teléfono', item.phone); add('Correo', item.email); add('Dirección', item.address); add('Notas', item.notes); }
     if (type === 'work') { add('Cliente', selected(data.clients, item.clientId)); add('Estado', item.status); add('Dirección', item.address); add('Inicio', dateFmt(item.start)); add('Entrega prevista', dateFmt(item.end)); add('Presupuesto', money(item.budget)); add('Avance', num(item.progress) + '%'); add('Responsable', teamName(item.owner)); add('Notas', item.notes); }
-    if (type === 'task') { add('Estado', item.status); add('Prioridad', item.priority); add('Obra', workName(item.workId)); add('Cliente', selected(data.clients, item.clientId)); add('Fecha límite', dateFmt(item.due)); add('Responsable', teamName(item.owner)); add('Descripción', item.description); }
+    if (type === 'task') { add('Tipo de seguimiento', item.category || 'General'); add('Estado', item.status); add('Prioridad', item.priority); add('Obra', workName(item.workId)); add('Cliente', selected(data.clients, item.clientId)); add('Fecha límite', dateFmt(item.due)); add('Responsable', teamName(item.owner)); add('Descripción', item.description); }
     if (type === 'quote') { add('Cliente', selected(data.clients, item.clientId)); add('Obra', workName(item.workId)); add('Estado', item.status); add('Fecha', dateFmt(item.date)); add('Válido hasta', dateFmt(item.validUntil)); if (!Array.isArray(item.items) || !item.items.length) { add('Base imponible', money(item.amount)); add(item.taxName || (num(item.taxRate) === 21 ? 'Impuesto anterior' : 'IGIC'), num(item.taxRate) + '%'); add('Total', money(total(item))); } add('Descripción y condiciones', item.notes); }
     if (type === 'invoice') { add('Cliente', selected(data.clients, item.clientId)); add('Obra', workName(item.workId)); add('Estado', item.status); add('Emisión', dateFmt(item.date)); add('Vencimiento', dateFmt(item.due)); if (!Array.isArray(item.items) || !item.items.length) { add('Base imponible', money(item.amount)); add(item.taxName || (num(item.taxRate) === 21 ? 'Impuesto anterior' : 'IGIC'), num(item.taxRate) + '%'); add('Total', money(total(item))); } add('Cobrado', money(paidFor(item))); add('Pendiente', money(outstanding(item))); add('Descripción', item.notes); }
     if (type === 'expense') { add('Categoría', item.category); add('Proveedor', item.vendor); add('Fecha', dateFmt(item.date)); add('Importe', money(item.amount)); add('Obra', workName(item.workId)); add('Notas', item.notes); }
@@ -637,7 +786,7 @@ grant select, insert, update on public.gestion_clientes to authenticated;`;
       ['name', 'Nombre de la obra', 'text', true], ['clientId', 'Cliente', 'client', true], ['status', 'Estado', 'select', false, STATUS.work], ['address', 'Dirección de la obra', 'text', false, null, 'full'], ['start', 'Fecha de inicio', 'date'], ['end', 'Fecha prevista de entrega', 'date'], ['budget', 'Presupuesto (€)', 'number'], ['progress', 'Avance (%)', 'number'], ['owner', 'Responsable', 'team'], ['notes', 'Descripción / notas', 'textarea', false, null, 'full']
     ],
     task: [
-      ['title', 'Tarea', 'text', true], ['workId', 'Obra relacionada', 'work'], ['clientId', 'Cliente', 'client'], ['due', 'Fecha límite', 'date'], ['priority', 'Prioridad', 'select', false, ['Alta', 'Media', 'Baja']], ['status', 'Estado', 'select', false, STATUS.task], ['owner', 'Responsable', 'team'], ['description', 'Descripción', 'textarea', false, null, 'full']
+      ['title', 'Tarea', 'text', true], ['category', 'Tipo de seguimiento', 'select', false, TASK_CATEGORIES], ['workId', 'Obra relacionada', 'work'], ['clientId', 'Cliente', 'client'], ['due', 'Fecha límite', 'date'], ['priority', 'Prioridad', 'select', false, ['Alta', 'Media', 'Baja']], ['status', 'Estado', 'select', false, STATUS.task], ['owner', 'Responsable', 'team'], ['description', 'Descripción', 'textarea', false, null, 'full']
     ],
     quote: [
       ['title', 'Concepto / asunto', 'text', true], ['number', 'Número de presupuesto', 'text'], ['clientId', 'Cliente', 'client', true], ['workId', 'Obra relacionada', 'work'], ['date', 'Fecha', 'date'], ['validUntil', 'Válido hasta', 'date'], ['taxRate', 'IGIC (%)', 'number'], ['status', 'Estado', 'select', false, STATUS.quote], ['notes', 'Detalle y condiciones', 'textarea', false, null, 'full']
@@ -775,7 +924,7 @@ grant select, insert, update on public.gestion_clientes to authenticated;`;
       if (['quote', 'invoice'].includes(type)) { item.date = item.date || today; item.taxRate = item.taxRate == null ? data.company.taxRate : item.taxRate; item.status = item.status || (type === 'quote' ? 'Borrador' : 'Borrador'); }
       if (type === 'lead') item.stage = item.stage || 'Nuevo';
       if (type === 'work') { item.status = item.status || 'Pendiente'; item.progress = 0; }
-      if (type === 'task') { item.status = item.status || 'Pendiente'; item.priority = item.priority || 'Media'; }
+      if (type === 'task') { item.status = item.status || 'Pendiente'; item.priority = item.priority || 'Media'; item.category = item.category || 'General'; }
       if (type === 'expense') { item.date = item.date || today; item.paid = item.paid || 'Pendiente'; }
       if (type === 'event' || type === 'payment') item.date = item.date || today;
       if (type === 'team') item.active = true;
@@ -1173,7 +1322,7 @@ grant select, insert, update on public.gestion_clientes to authenticated;`;
       return;
     }
     if (action === 'backdrop' && target === $('.modal-backdrop')) { $('#modal-root').innerHTML = ''; return; }
-    if (action === 'new') { openForm(target.dataset.type); return; }
+    if (action === 'new') { openForm(target.dataset.type, null, { category: target.dataset.category, kind: target.dataset.kind }); return; }
     if (action === 'quick-new') { openQuickNew(target); return; }
     if (action === 'edit') { openForm(target.dataset.type, target.dataset.id); return; }
     if (action === 'delete') { removeEntity(target.dataset.type, target.dataset.id); return; }
@@ -1196,7 +1345,7 @@ grant select, insert, update on public.gestion_clientes to authenticated;`;
     if (action === 'restore') { $('#restore-input').click(); return; }
     if (action === 'export-all') { exportAll(); return; }
     if (action === 'export-report') { exportReport(); return; }
-    if (action === 'cloud-setup') { download('gestion-clientes-supabase-setup.sql', CLOUD_SETUP_SQL, 'text/plain;charset=utf-8'); toast('Descargué el SQL. Ejecútalo en el Editor SQL de Supabase.', 'good'); return; }
+    if (action === 'cloud-setup') { download('ivory37-supabase-dos-aplicaciones.sql', CLOUD_SETUP_SQL, 'text/plain;charset=utf-8'); toast('SQL compartido descargado. Ejecútalo una vez para preparar las dos aplicaciones.', 'good'); return; }
     if (action === 'toggle-theme') { toggleTheme(); return; }
     if (action === 'print') { printPage(); return; }
     if (action === 'cloud-sync') { syncCloud(true); return; }
