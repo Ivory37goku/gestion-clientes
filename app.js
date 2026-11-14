@@ -219,7 +219,7 @@
       return '<div class="pipe-step"><div class="pipe-label">' + esc(stage) + '</div><div class="pipe-value">' + subset.length + '</div><div class="pipe-bar"><i style="width:' + Math.round(subset.length / max * 100) + '%"></i></div></div>';
     }).join('');
     const setup = !data.company.name ? '<section class="setup-card"><h2>Deja lista tu empresa</h2><p>Completa los datos básicos y añade tu primer contacto para empezar.</p><div class="setup-steps"><span class="setup-step">1. Configura la empresa</span><span class="setup-step">2. Añade un lead o cliente</span><span class="setup-step">3. Crea una obra y sus tareas</span></div><div style="margin-top:11px">' + btn('Configurar empresa', 'settings-tab', 'btn-primary', ' data-tab="empresa"') + '</div></section>' : '';
-    const hero = '<section class="hero"><div><p class="eyebrow">' + esc(new Date().toLocaleDateString('es-ES', { weekday: 'long', day: 'numeric', month: 'long' })) + '</p><h1>' + (data.company.name ? 'Hola, <span style="color:var(--brand)">' + esc(data.company.owner || data.company.name) + '</span>' : 'Tu empresa, <span style="color:var(--brand)">en orden.</span>') + '</h1><p>Un vistazo claro a las oportunidades, las obras y los compromisos que mueven el negocio.</p></div><div class="hero-actions">' + newBtn('lead', 'Nuevo lead') + newBtn('task', 'Nueva tarea') + '</div></section>';
+    const hero = '<section class="hero"><div><p class="eyebrow">' + esc(new Date().toLocaleDateString('es-ES', { weekday: 'long', day: 'numeric', month: 'long' })) + '</p><h1>' + (data.company.name ? 'Hola, <span style="color:var(--brand)">' + esc(data.company.owner || data.company.name) + '</span>' : 'Tu empresa, <span style="color:var(--brand)">en orden.</span>') + '</h1><p>Un vistazo claro a las oportunidades, las obras y los compromisos que mueven el negocio.</p></div><div class="hero-actions">' + newBtn('lead', 'Nuevo lead') + newBtn('client', 'Nuevo cliente') + newBtn('work', 'Nueva obra') + newBtn('task', 'Nueva tarea') + '</div></section>';
     const kpis = '<div class="kpis">' +
       kpi('Leads abiertos', openLeads.length, money(weighted) + ' en oportunidades', '✳') +
       kpi('Obras en curso', activeWorks, data.works.length + ' obras en total', '▦') +
@@ -258,9 +258,14 @@
   }
 
   function renderListRow(key, x) {
-    if (key === 'leads') return row(x.name || x.company, (x.company && x.name ? x.company + ' · ' : '') + (x.source || 'Origen sin indicar') + (x.nextDate ? ' · próximo paso ' + dateFmt(x.nextDate) : ''), x.stage, amountEnd(x.value, x.owner ? teamName(x.owner) : ''), '', x.id, 'lead');
-    if (key === 'clients') return row(x.company || x.name, [x.name && x.company ? x.name : '', x.email, x.phone, data.works.filter(w => w.clientId === x.id).length + ' obras'].filter(Boolean).join(' · '), '', '<span class="row-date">' + esc(x.city || '') + '</span>', '', x.id, 'client');
-    if (key === 'works') return '<div class="row-item" data-action="detail" data-type="work" data-id="' + esc(x.id) + '"><div class="row-main"><div class="row-title">' + esc(x.name) + badge(x.status) + '</div><div class="row-sub">' + esc(selected(data.clients, x.clientId) + (x.address ? ' · ' + x.address : '') + (x.end ? ' · entrega ' + dateFmt(x.end) : '')) + '</div><div class="progress" style="margin-top:8px"><i style="width:' + Math.min(100, Math.max(0, num(x.progress))) + '%"></i></div></div><div class="row-end"><div><div class="row-amount">' + esc(money(x.budget)) + '</div><div class="row-date">' + esc(Math.round(num(x.progress)) + '% completado') + '</div></div></div></div>';
+    if (key === 'leads') {
+      const nextAction = x.clientId
+        ? '<button type="button" class="btn btn-sm" data-action="detail" data-type="client" data-id="' + esc(x.clientId) + '">Abrir cliente →</button>'
+        : x.stage !== 'Perdido' ? '<button type="button" class="btn btn-sm btn-primary" data-action="convert-lead" data-id="' + esc(x.id) + '">Pasar a cliente →</button>' : '<button type="button" class="btn btn-sm" data-action="detail" data-type="lead" data-id="' + esc(x.id) + '">Ver oportunidad →</button>';
+      return '<div class="row-item list-flow-row"><div class="row-main" data-action="detail" data-type="lead" data-id="' + esc(x.id) + '"><div class="row-title">' + esc(x.name || x.company) + badge(x.stage) + '</div><div class="row-sub">' + esc((x.company && x.name ? x.company + ' · ' : '') + (x.source || 'Origen sin indicar') + (x.nextDate ? ' · próximo paso ' + dateFmt(x.nextDate) : '')) + '</div></div><div class="row-end"><div class="row-value-block"><div class="row-amount">' + esc(money(x.value)) + '</div><div class="row-date">' + esc(x.owner ? teamName(x.owner) : 'Valor estimado') + '</div></div>' + nextAction + '</div></div>';
+    }
+    if (key === 'clients') return '<div class="row-item list-flow-row"><div class="row-main" data-action="detail" data-type="client" data-id="' + esc(x.id) + '"><div class="row-title">' + esc(x.company || x.name) + '</div><div class="row-sub">' + esc([x.name && x.company ? x.name : '', x.email, x.phone, data.works.filter(w => w.clientId === x.id).length + ' obras'].filter(Boolean).join(' · ')) + '</div></div><div class="row-end"><span class="row-date">' + esc(x.city || '') + '</span><button type="button" class="btn btn-sm" data-action="quick-new" data-type="work" data-client-id="' + esc(x.id) + '">＋ Crear obra</button></div></div>';
+    if (key === 'works') return '<div class="row-item list-flow-row"><div class="row-main" data-action="detail" data-type="work" data-id="' + esc(x.id) + '"><div class="row-title">' + esc(x.name) + badge(x.status) + '</div><div class="row-sub">' + esc(selected(data.clients, x.clientId) + (x.address ? ' · ' + x.address : '') + (x.end ? ' · entrega ' + dateFmt(x.end) : '')) + '</div><div class="progress" style="margin-top:8px"><i style="width:' + Math.min(100, Math.max(0, num(x.progress))) + '%"></i></div></div><div class="row-end"><div class="row-value-block"><div class="row-amount">' + esc(money(x.budget)) + '</div><div class="row-date">' + esc(Math.round(num(x.progress)) + '% completado') + '</div></div><div class="row-quick-actions"><button type="button" class="btn btn-sm" data-action="quick-new" data-type="task" data-client-id="' + esc(x.clientId || '') + '" data-work-id="' + esc(x.id) + '">＋ Tarea</button><button type="button" class="btn btn-sm" data-action="quick-new" data-type="quote" data-client-id="' + esc(x.clientId || '') + '" data-work-id="' + esc(x.id) + '">Presupuesto</button></div></div></div>';
     if (key === 'tasks') return '<div class="row-item"><button class="tiny-btn ' + (x.status === 'Hecha' ? '' : 'danger') + '" data-action="toggle-task" data-id="' + esc(x.id) + '" aria-label="' + (x.status === 'Hecha' ? 'Reabrir' : 'Marcar hecha') + '">' + (x.status === 'Hecha' ? '✓' : '○') + '</button><div class="row-main" data-action="detail" data-type="task" data-id="' + esc(x.id) + '"><div class="row-title">' + esc(x.title) + badge(x.status) + badge(x.priority || 'Media') + '</div><div class="row-sub">' + esc(workName(x.workId) || selected(data.clients, x.clientId) || 'Sin proyecto') + (x.owner ? ' · ' + teamName(x.owner) : '') + '</div></div><div class="row-end"><span class="row-date">' + esc(x.due ? 'Vence ' + dateFmt(x.due) : 'Sin fecha') + '</span></div></div>';
     if (key === 'quotes') return row(x.title || ('Presupuesto ' + x.number), selected(data.clients, x.clientId) + (x.workId ? ' · ' + workName(x.workId) : '') + (x.validUntil ? ' · válido hasta ' + dateFmt(x.validUntil) : ''), x.status, amountEnd(total(x), dateFmt(x.date)), '', x.id, 'quote');
     return '<div class="row-item" data-action="detail" data-type="document" data-id="' + esc(x.id) + '"><div class="row-main"><div class="row-title">' + esc(x.title) + badge(x.kind || 'Documento') + '</div><div class="row-sub">' + esc(workName(x.workId) || selected(data.clients, x.clientId) || 'Sin asociar') + (x.notes ? ' · ' + esc(x.notes) : '') + '</div></div><div class="row-end"><a class="document-link btn btn-sm" href="' + esc(safeHref(x.url)) + '" target="_blank" rel="noopener">Abrir ↗</a><div class="row-actions"><button class="tiny-btn" data-action="edit" data-type="document" data-id="' + esc(x.id) + '">Editar</button><button class="tiny-btn danger" data-action="delete" data-type="document" data-id="' + esc(x.id) + '">Eliminar</button></div></div></div>';
@@ -359,6 +364,99 @@
     return '<section class="quote-breakdown"><div class="card-head"><div><h3>Desglose de partidas</h3><p>Mano de obra, desplazamientos, materiales y otros conceptos.</p></div></div><div class="table-wrap"><table><thead><tr><th>Tipo</th><th>Descripción</th><th class="numeric">Cantidad</th><th>Unidad</th><th class="numeric">Precio / unidad</th><th class="numeric">Importe</th></tr></thead><tbody>' + rows + '</tbody><tfoot><tr><th colspan="5">Base imponible</th><th class="numeric">' + esc(money(item.amount)) + '</th></tr><tr><th colspan="5">' + esc(item.taxName || 'IGIC') + ' (' + esc(num(item.taxRate)) + '%)</th><th class="numeric">' + esc(money(taxAmount(item))) + '</th></tr><tr class="quote-total-row"><th colspan="5">TOTAL</th><th class="numeric">' + esc(money(total(item))) + '</th></tr></tfoot></table></div></section>';
   }
 
+  function quickAction(label, type, context, description) {
+    const item = context.item;
+    const contextType = context.type;
+    const clientId = contextType === 'client' ? item.id : (item.clientId || '');
+    const workId = contextType === 'work' ? item.id : (item.workId || '');
+    const leadId = contextType === 'lead' ? item.id : '';
+    const icons = { work: '▦', quote: '▤', task: '☷', event: '◷', expense: '€', document: '↗' };
+    return '<button type="button" class="quick-action" data-action="quick-new" data-type="' + type + '" data-client-id="' + esc(clientId) + '" data-work-id="' + esc(workId) + '" data-lead-id="' + esc(leadId) + '"><span class="quick-action-icon">' + (icons[type] || '＋') + '</span><span class="quick-action-copy"><strong>' + esc(label) + '</strong><small>' + esc(description) + '</small></span><span class="quick-action-arrow">＋</span></button>';
+  }
+
+  function flowSteps(labels, complete, active) {
+    return '<div class="flow-steps flow-steps-' + labels.length + '">' + labels.map((label, index) => '<div class="flow-step ' + (complete(index) ? 'is-done' : '') + (active === index ? ' is-active' : '') + '"><span class="flow-step-dot">' + (complete(index) ? '✓' : String(index + 1)) + '</span><span>' + esc(label) + '</span></div>').join('') + '</div>';
+  }
+
+  function leadProcessPanel(item) {
+    const stages = ['Nuevo', 'Contactado', 'Cualificado', 'Propuesta enviada', 'Ganado'];
+    const lost = item.stage === 'Perdido';
+    const current = item.clientId ? 4 : Math.max(0, stages.indexOf(item.stage));
+    const next = stages[Math.min(current + 1, stages.length - 1)];
+    const steps = flowSteps(['Lead nuevo', 'Contactado', 'Cualificado', 'Propuesta', 'Cliente'], index => !lost && index < current, lost ? -1 : current);
+    let nextAction = '';
+    if (lost) nextAction = '<button type="button" class="btn btn-sm" data-action="reopen-lead" data-id="' + esc(item.id) + '">Reabrir oportunidad</button><span class="workflow-hint">Esta oportunidad está cerrada como perdida.</span>';
+    else if (item.clientId) nextAction = '<button type="button" class="btn btn-primary btn-sm" data-action="detail" data-type="client" data-id="' + esc(item.clientId) + '">Abrir cliente →</button>' + (item.workId ? '<button type="button" class="btn btn-sm" data-action="detail" data-type="work" data-id="' + esc(item.workId) + '">Abrir obra →</button>' : '<button type="button" class="btn btn-sm" data-action="quick-new" data-type="work" data-client-id="' + esc(item.clientId) + '">Crear primera obra →</button>');
+    else if (item.stage === 'Ganado') nextAction = '<span class="workflow-hint">Oportunidad ganada. Crea la ficha de cliente para continuar.</span><button type="button" class="btn btn-primary btn-sm" data-action="convert-lead" data-id="' + esc(item.id) + '">Crear cliente →</button>';
+    else nextAction = '<span class="workflow-hint">Siguiente paso recomendado: ' + esc(item.stage === 'Propuesta enviada' ? 'convertirlo en cliente cuando acepte.' : 'marcar «' + next + '» cuando avances.') + '</span><button type="button" class="btn btn-sm" data-action="quick-new" data-type="event" data-lead-id="' + esc(item.id) + '">Programar seguimiento</button>' + (item.stage === 'Propuesta enviada' ? '<button type="button" class="btn btn-primary btn-sm" data-action="convert-lead" data-id="' + esc(item.id) + '">Pasar a cliente →</button>' : '<button type="button" class="btn btn-primary btn-sm" data-action="advance-lead" data-id="' + esc(item.id) + '">Avanzar a ' + esc(next) + ' →</button>');
+    return '<section class="context-panel"><div class="context-panel-head"><div><p class="eyebrow">SIGUIENTE PASO</p><h3>Proceso comercial</h3><p>Avanza la oportunidad desde aquí sin volver a editarla.</p></div>' + badge(lost ? 'Perdido' : item.clientId ? 'Cliente' : item.stage || 'Nuevo') + '</div>' + steps + '<div class="workflow-next">' + nextAction + '</div>' + (item.clientId ? '<div class="quick-actions">' + quickAction('Crear obra', 'work', { type: 'client', item: data.clients.find(x => x.id === item.clientId) || { id: item.clientId } }, 'Empieza el proyecto') + quickAction('Crear presupuesto', 'quote', { type: 'client', item: data.clients.find(x => x.id === item.clientId) || { id: item.clientId } }, 'Prepara la propuesta') + '</div>' : '') + '</section>';
+  }
+
+  function clientWorkProcessPanel(type, item, id) {
+    const works = type === 'client' ? data.works.filter(x => x.clientId === id) : [item];
+    const workIds = new Set(works.map(x => x.id));
+    const quotes = data.quotes.filter(x => type === 'client' ? x.clientId === id : x.workId === id);
+    const invoices = data.invoices.filter(x => type === 'client' ? x.clientId === id : x.workId === id);
+    const hasWork = works.length > 0;
+    const hasQuote = quotes.length > 0;
+    const hasInvoice = invoices.length > 0;
+    const labels = ['Cliente', 'Obra', 'Presupuesto', 'Factura'];
+    const done = [true, hasWork, hasQuote, hasInvoice];
+    const active = done.findIndex((value, index) => index > 0 && !value);
+    const focus = active < 0 ? 3 : active;
+    const context = { type, item };
+    const actions = type === 'client'
+      ? quickAction('Crear obra', 'work', context, 'Organiza un nuevo proyecto') + quickAction('Presupuesto', 'quote', context, 'Detalla y envía una oferta') + quickAction('Nueva tarea', 'task', context, 'Apunta el siguiente trabajo') + quickAction('Programar cita', 'event', context, 'Llamada, visita o reunión')
+      : quickAction('Nueva tarea', 'task', context, 'Planifica el trabajo') + quickAction('Presupuesto', 'quote', context, 'Detalla horas y materiales') + quickAction('Registrar gasto', 'expense', context, 'Controla el coste de obra') + quickAction('Añadir documento', 'document', context, 'Guarda planos y archivos');
+    const hint = !hasWork && type === 'client' ? 'Empieza creando una obra para tener juntos tareas, presupuestos y documentos.' : !hasQuote ? 'Añade un presupuesto cuando quieras concretar el alcance y el precio.' : !hasInvoice ? 'Al aceptar el presupuesto, conviértelo en factura desde su ficha.' : 'Toda la actividad de este proyecto está reunida aquí.';
+    return '<section class="context-panel"><div class="context-panel-head"><div><p class="eyebrow">CLIENTE Y PROYECTOS</p><h3>Flujo de trabajo</h3><p>' + esc(hint) + '</p></div></div>' + flowSteps(labels, index => done[index], focus) + '<div class="quick-actions">' + actions + '</div></section>';
+  }
+
+  function relatedRecord(type, item) {
+    const title = item.name || item.title || item.number || item.company || 'Registro';
+    let subtitle = '';
+    let amount = '';
+    if (type === 'work') { subtitle = item.address || selected(data.clients, item.clientId); amount = money(item.budget); }
+    else if (type === 'quote' || type === 'invoice') { subtitle = dateFmt(item.date); amount = money(total(item)); }
+    else if (type === 'task') { subtitle = item.due ? 'Vence ' + dateFmt(item.due) : 'Sin fecha límite'; }
+    else if (type === 'expense') { subtitle = item.vendor || item.category || 'Gasto de obra'; amount = money(item.amount); }
+    else if (type === 'document') { subtitle = item.kind || 'Documento'; }
+    else if (type === 'event') { subtitle = dateFmt(item.date) + (item.time ? ' · ' + item.time : ''); }
+    return '<button type="button" class="related-record" data-action="detail" data-type="' + type + '" data-id="' + esc(item.id) + '"><span class="related-record-main"><strong>' + esc(title) + '</strong><small>' + esc(subtitle) + '</small></span><span class="related-record-end">' + (item.status ? badge(item.status) : '') + (amount ? '<strong>' + esc(amount) + '</strong>' : '') + '</span><span class="related-record-arrow">›</span></button>';
+  }
+
+  function relationshipGroup(label, type, items) {
+    if (!items.length) return '';
+    return '<section class="relationship-group"><div class="relationship-group-title"><h4>' + esc(label) + '</h4><span>' + items.length + '</span></div><div class="relationship-list">' + items.map(item => relatedRecord(type, item)).join('') + '</div></section>';
+  }
+
+  function renderRelationships(type, item, id) {
+    let groups = '';
+    if (type === 'client') {
+      const works = data.works.filter(x => x.clientId === id);
+      const workIds = new Set(works.map(x => x.id));
+      const tasks = data.tasks.filter(x => x.clientId === id || workIds.has(x.workId));
+      groups = relationshipGroup('Obras', 'work', works) + relationshipGroup('Presupuestos', 'quote', data.quotes.filter(x => x.clientId === id)) + relationshipGroup('Facturas', 'invoice', data.invoices.filter(x => x.clientId === id)) + relationshipGroup('Tareas', 'task', tasks) + relationshipGroup('Documentos', 'document', data.documents.filter(x => x.clientId === id || workIds.has(x.workId)));
+      groups += relationshipGroup('Citas', 'event', data.events.filter(x => x.clientId === id || workIds.has(x.workId)));
+      if (item.sourceLeadId) {
+        const source = data.leads.find(x => x.id === item.sourceLeadId);
+        if (source) groups = '<div class="source-lead-note">Convertido desde el lead <button type="button" data-action="detail" data-type="lead" data-id="' + esc(source.id) + '">' + esc(source.name || source.company || 'Abrir oportunidad') + ' ↗</button></div>' + groups;
+      }
+    } else if (type === 'work') {
+      groups = relationshipGroup('Tareas', 'task', data.tasks.filter(x => x.workId === id)) + relationshipGroup('Presupuestos', 'quote', data.quotes.filter(x => x.workId === id)) + relationshipGroup('Facturas', 'invoice', data.invoices.filter(x => x.workId === id)) + relationshipGroup('Gastos', 'expense', data.expenses.filter(x => x.workId === id)) + relationshipGroup('Documentos', 'document', data.documents.filter(x => x.workId === id)) + relationshipGroup('Citas', 'event', data.events.filter(x => x.workId === id));
+    }
+    return groups ? '<div class="relationships"><div class="relationships-heading"><div><p class="eyebrow">HISTORIAL RELACIONADO</p><h3>' + (type === 'client' ? 'Actividad del cliente' : 'Actividad de la obra') + '</h3></div></div><div class="relationship-grid">' + groups + '</div></div>' : '';
+  }
+
+  function openConvertLead(id) {
+    const lead = data.leads.find(x => x.id === id);
+    if (!lead) return;
+    const label = lead.company || lead.name || 'este contacto';
+    const summary = [lead.name, lead.phone, lead.email, num(lead.value) ? 'Valor estimado: ' + money(lead.value) : ''].filter(Boolean).join(' · ');
+    const modal = '<div class="modal-backdrop" data-action="backdrop"><section class="modal conversion-modal" role="dialog" aria-modal="true" aria-labelledby="convert-title"><div class="modal-head"><h2 id="convert-title">Pasar oportunidad a cliente</h2><button type="button" class="close-btn" data-action="close-modal" aria-label="Cerrar">×</button></div><div class="modal-body"><div class="conversion-intro"><span class="quick-action-icon">↗</span><div><strong>' + esc(label) + '</strong><p>' + esc(summary || 'Se conservarán los datos del contacto y el historial del lead.') + '</p></div></div><p class="conversion-question">¿Qué quieres preparar ahora?</p><div class="conversion-choices"><button type="button" class="conversion-choice" data-action="convert-lead-finish" data-create-work="false" data-id="' + esc(id) + '"><span class="choice-mark">1</span><span><strong>Crear solo el cliente</strong><small>Podrás abrir su ficha y crear la obra más tarde.</small></span><span class="choice-arrow">→</span></button><button type="button" class="conversion-choice is-recommended" data-action="convert-lead-finish" data-create-work="true" data-id="' + esc(id) + '"><span class="choice-mark">2</span><span><strong>Crear cliente y primera obra</strong><small>Recomendado si ya está aprobado el trabajo. La obra quedará vinculada al contacto.</small></span><span class="choice-arrow">→</span></button></div><p class="modal-note conversion-footnote">El lead seguirá guardado como historial y quedará enlazado al cliente creado.</p></div></section></div>';
+    $('#modal-root').innerHTML = modal;
+  }
+
   function renderDetail(type, id) {
     const map = { lead: 'leads', client: 'clients', work: 'works', task: 'tasks', quote: 'quotes', invoice: 'invoices', expense: 'expenses', event: 'events', document: 'documents', team: 'team', payment: 'payments' };
     const collection = map[type];
@@ -378,11 +476,11 @@
     if (type === 'document') { add('Tipo', item.kind); add('Relacionado con', workName(item.workId) || selected(data.clients, item.clientId)); add('Enlace', item.url); add('Notas', item.notes); }
     if (type === 'team') { add('Puesto', item.role); add('Correo', item.email); add('Teléfono', item.phone); add('Estado', item.active === false ? 'Inactivo' : 'Activo'); }
     if (type === 'payment') { add('Factura', selected(data.invoices, item.invoiceId)); add('Fecha', dateFmt(item.date)); add('Método', item.method); add('Importe', money(item.amount)); add('Notas', item.notes); }
-    const related = type === 'client' ? data.works.filter(x => x.clientId === id).map(x => '<button class="row-item" data-action="detail" data-type="work" data-id="' + esc(x.id) + '"><span class="row-main"><span class="row-title">' + esc(x.name) + badge(x.status) + '</span><span class="row-sub">' + esc(money(x.budget)) + '</span></span></button>').join('')
-      : type === 'work' ? data.tasks.filter(x => x.workId === id).map(x => '<button class="row-item" data-action="detail" data-type="task" data-id="' + esc(x.id) + '"><span class="row-main"><span class="row-title">' + esc(x.title) + badge(x.status) + '</span><span class="row-sub">' + esc(x.due ? dateFmt(x.due) : 'Sin fecha') + '</span></span></button>').join('') : '';
-    const extraActions = type === 'lead' && !item.clientId ? '<button class="btn btn-primary btn-sm" data-action="convert-lead" data-id="' + esc(id) + '">Convertir en cliente + obra</button>' : type === 'quote' ? '<button class="btn btn-sm" data-action="print">Imprimir / guardar PDF</button>' + (item.status !== 'Rechazada' ? '<button class="btn btn-primary btn-sm" data-action="quote-to-invoice" data-id="' + esc(id) + '">Crear factura</button>' : '') : type === 'invoice' && outstanding(item) > 0 ? '<button class="btn btn-primary btn-sm" data-action="payment" data-id="' + esc(id) + '">Registrar cobro</button>' : '';
+    const extraActions = type === 'lead' && !item.clientId && item.stage !== 'Perdido' ? '<button type="button" class="btn btn-primary btn-sm" data-action="convert-lead" data-id="' + esc(id) + '">Pasar a cliente</button>' : type === 'quote' ? '<button class="btn btn-sm" data-action="print">Imprimir / guardar PDF</button>' + (item.status !== 'Rechazada' ? '<button class="btn btn-primary btn-sm" data-action="quote-to-invoice" data-id="' + esc(id) + '">Crear factura</button>' : '') : type === 'invoice' && outstanding(item) > 0 ? '<button class="btn btn-primary btn-sm" data-action="payment" data-id="' + esc(id) + '">Registrar cobro</button>' : '';
     const breakdown = ['quote', 'invoice'].includes(type) && Array.isArray(item.items) && item.items.length ? quoteBreakdown(item) : '';
-    const modal = '<div class="modal-backdrop" data-action="backdrop"><section class="modal" role="dialog" aria-modal="true" aria-labelledby="detail-title"><div class="modal-head"><h2 id="detail-title">' + esc(title) + '</h2><button class="close-btn" data-action="close-modal" aria-label="Cerrar">×</button></div><div class="modal-body"><div class="list">' + facts.join('') + '</div>' + breakdown + (related ? '<div style="margin-top:16px"><div class="card-head"><h2>' + (type === 'client' ? 'Obras del cliente' : 'Tareas de la obra') + '</h2></div><div class="list">' + related + '</div></div>' : '') + '</div><div class="modal-foot"><div>' + extraActions + '</div><div><button class="btn btn-danger btn-sm" data-action="delete" data-type="' + type + '" data-id="' + esc(id) + '">Eliminar</button><button class="btn btn-primary btn-sm" data-action="edit" data-type="' + type + '" data-id="' + esc(id) + '">Editar</button></div></div></section></div>';
+    const processPanel = type === 'lead' ? leadProcessPanel(item) : ['client', 'work'].includes(type) ? clientWorkProcessPanel(type, item, id) : '';
+    const relationships = renderRelationships(type, item, id);
+    const modal = '<div class="modal-backdrop" data-action="backdrop"><section class="modal" role="dialog" aria-modal="true" aria-labelledby="detail-title"><div class="modal-head"><h2 id="detail-title">' + esc(title) + '</h2><button type="button" class="close-btn" data-action="close-modal" aria-label="Cerrar">×</button></div><div class="modal-body">' + processPanel + '<div class="list">' + facts.join('') + '</div>' + breakdown + relationships + '</div><div class="modal-foot"><div>' + extraActions + '</div><div><button type="button" class="btn btn-danger btn-sm" data-action="delete" data-type="' + type + '" data-id="' + esc(id) + '">Eliminar</button><button type="button" class="btn btn-primary btn-sm" data-action="edit" data-type="' + type + '" data-id="' + esc(id) + '">Editar</button></div></div></section></div>';
     $('#modal-root').innerHTML = modal;
   }
 
@@ -523,6 +621,12 @@
   function openForm(type, id, preset) {
     const collection = TYPE_COLLECTION[type];
     if (!collection || !FIELDS[type]) return;
+    if (!id && ['work', 'quote', 'invoice'].includes(type) && !data.clients.length) {
+      toast('Primero crea un cliente o convierte un lead para poder vincular este registro.', 'bad');
+      setView('clients');
+      openForm('client');
+      return;
+    }
     const old = id ? data[collection].find(x => x.id === id) : null;
     const item = Object.assign({}, old || {}, preset || {});
     if (!old) {
@@ -583,15 +687,19 @@
     if (type === 'invoice' && values.status === 'Pagada') values.status = 'Emitida';
     if (type === 'lead' && values.probability === 0) values.probability = defaultProbability(values.stage);
     const id = form.dataset.id;
+    const savedId = id || uid();
     const time = nowIso();
     const index = id ? data[collection].findIndex(x => x.id === id) : -1;
     if (id && index < 0) { toast('No se encontró el registro. Actualiza la lista e inténtalo de nuevo.', 'bad'); return; }
     if (!commitChange(() => {
       if (id) data[collection][index] = Object.assign({}, data[collection][index], values, { updatedAt: time });
-      else data[collection].unshift(Object.assign({ id: uid(), createdAt: time, updatedAt: time }, values));
+      else data[collection].unshift(Object.assign({ id: savedId, createdAt: time, updatedAt: time }, values));
     })) return;
     $('#modal-root').innerHTML = '';
-    render();
+    const destination = { lead: 'leads', client: 'clients', work: 'works', task: 'tasks', quote: 'quotes', invoice: 'finance', expense: 'finance', event: 'agenda', document: 'documents', team: 'settings', payment: 'finance' }[type] || view;
+    if (type === 'team') settingsTab = 'equipo';
+    setView(destination);
+    renderDetail(type, savedId);
     toast((id ? 'Cambios guardados' : 'Registro creado') + ' correctamente.', 'good');
   }
 
@@ -616,25 +724,67 @@
     toast('Registro eliminado.', 'good');
   }
 
-  function convertLead(id) {
+  function convertLead(id, createWork) {
     const lead = data.leads.find(x => x.id === id);
     if (!lead) return;
-    if (!confirm('Se creará un cliente y una obra con los datos del lead. ¿Continuar?')) return;
+    if (lead.clientId) { setView('clients'); renderDetail('client', lead.clientId); return; }
     const time = nowIso();
     const client = { id: uid(), name: lead.name || '', company: lead.company || lead.name || '', phone: lead.phone || '', email: lead.email || '', notes: lead.notes || '', createdAt: time, updatedAt: time, sourceLeadId: lead.id };
-    const work = { id: uid(), name: lead.company ? 'Obra · ' + lead.company : 'Nueva obra · ' + lead.name, clientId: client.id, status: 'Pendiente', budget: num(lead.value), progress: 0, notes: 'Creada desde el lead. Completa dirección, fechas y alcance.', createdAt: time, updatedAt: time, sourceLeadId: lead.id };
+    const work = createWork ? { id: uid(), name: lead.company ? 'Obra · ' + lead.company : 'Nueva obra · ' + lead.name, clientId: client.id, status: 'Pendiente', budget: num(lead.value), progress: 0, notes: 'Creada desde el lead. Completa dirección, fechas y alcance.', createdAt: time, updatedAt: time, sourceLeadId: lead.id } : null;
     if (!commitChange(() => {
       data.clients.unshift(client);
-      data.works.unshift(work);
+      if (work) data.works.unshift(work);
       const currentLead = data.leads.find(x => x.id === id);
       currentLead.stage = 'Ganado';
       currentLead.clientId = client.id;
-      currentLead.workId = work.id;
+      currentLead.workId = work ? work.id : '';
       currentLead.updatedAt = time;
     })) return;
     $('#modal-root').innerHTML = '';
-    render();
-    toast('Lead convertido. Ya tienes el cliente y su nueva obra.', 'good');
+    setView(work ? 'works' : 'clients');
+    renderDetail(work ? 'work' : 'client', work ? work.id : client.id);
+    toast(work ? 'Cliente y primera obra creados. Ya puedes organizar tareas y presupuestos.' : 'Lead convertido en cliente. Ya puedes crear su primera obra desde esta ficha.', 'good');
+  }
+
+  function updateLeadStage(id, stage) {
+    const lead = data.leads.find(x => x.id === id);
+    if (!lead || !STATUS.lead.includes(stage)) return;
+    if (commitChange(() => { lead.stage = stage; lead.updatedAt = nowIso(); })) {
+      renderDetail('lead', id);
+      toast('Oportunidad actualizada: ' + stage + '.', 'good');
+    }
+  }
+
+  function advanceLead(id) {
+    const lead = data.leads.find(x => x.id === id);
+    if (!lead) return;
+    const stages = ['Nuevo', 'Contactado', 'Cualificado', 'Propuesta enviada'];
+    const index = stages.indexOf(lead.stage);
+    if (index < 0 || index >= stages.length - 1) { openConvertLead(id); return; }
+    updateLeadStage(id, stages[index + 1]);
+  }
+
+  function openQuickNew(target) {
+    const type = target.dataset.type;
+    const preset = {};
+    if (target.dataset.clientId) preset.clientId = target.dataset.clientId;
+    if (target.dataset.workId) preset.workId = target.dataset.workId;
+    const lead = target.dataset.leadId ? data.leads.find(x => x.id === target.dataset.leadId) : null;
+    if (lead && type === 'event') {
+      preset.title = 'Seguimiento · ' + (lead.company || lead.name || 'oportunidad');
+      preset.date = lead.nextDate || today;
+      preset.kind = 'Llamada';
+      preset.notes = 'Seguimiento comercial de ' + (lead.company || lead.name || 'la oportunidad') + (lead.phone ? ' · Teléfono: ' + lead.phone : '');
+    }
+    const client = preset.clientId ? data.clients.find(x => x.id === preset.clientId) : null;
+    const work = preset.workId ? data.works.find(x => x.id === preset.workId) : null;
+    if (type === 'work' && client) preset.name = 'Obra · ' + (client.company || client.name);
+    if (type === 'quote') preset.title = 'Presupuesto · ' + (work ? work.name : client ? (client.company || client.name) : '');
+    if (type === 'task') preset.title = (work ? 'Trabajo · ' + work.name : client ? 'Tarea · ' + (client.company || client.name) : '');
+    if (type === 'event' && !preset.title && (work || client)) preset.title = (work ? 'Visita de obra · ' + work.name : 'Cita · ' + (client.company || client.name));
+    if (type === 'document' && work) preset.title = 'Documento · ' + work.name;
+    if (type === 'expense' && work) preset.title = 'Gasto de obra · ' + work.name;
+    openForm(type, '', preset);
   }
 
   function quoteToInvoice(id) {
@@ -834,10 +984,14 @@
     }
     if (action === 'backdrop' && target === $('.modal-backdrop')) { $('#modal-root').innerHTML = ''; return; }
     if (action === 'new') { openForm(target.dataset.type); return; }
+    if (action === 'quick-new') { openQuickNew(target); return; }
     if (action === 'edit') { openForm(target.dataset.type, target.dataset.id); return; }
     if (action === 'delete') { removeEntity(target.dataset.type, target.dataset.id); return; }
     if (action === 'detail') { renderDetail(target.dataset.type, target.dataset.id); return; }
-    if (action === 'convert-lead') { convertLead(target.dataset.id); return; }
+    if (action === 'convert-lead') { openConvertLead(target.dataset.id); return; }
+    if (action === 'convert-lead-finish') { convertLead(target.dataset.id, target.dataset.createWork === 'true'); return; }
+    if (action === 'advance-lead') { advanceLead(target.dataset.id); return; }
+    if (action === 'reopen-lead') { updateLeadStage(target.dataset.id, 'Nuevo'); return; }
     if (action === 'quote-to-invoice') { quoteToInvoice(target.dataset.id); return; }
     if (action === 'payment') { openPayment(target.dataset.id); return; }
     if (action === 'toggle-task') {

@@ -7,6 +7,7 @@ Windows; no modifica ni comparte los datos de Control Laboral.
 ## Qué incluye
 
 - Leads con embudo comercial, importe estimado, responsable y seguimiento.
+- Flujo guiado de lead a cliente, obra, presupuesto y factura; acciones rápidas con el cliente y la obra ya vinculados.
 - Clientes convertibles desde un lead y con varias obras asociadas.
 - Obras con fechas, presupuesto, estado, avance y responsable.
 - Tareas por obra o cliente, con prioridades y vencimientos.
