@@ -6,9 +6,9 @@
   "main": "desktop/main.cjs",
   "scripts": {
     "start": "electron .",
-    "dist:win": "electron-builder --x64",
-    "dist:win:setup": "electron-builder --win nsis --x64",
-    "dist:win:portable": "electron-builder --win portable --x64"
+    "dist:win": "electron-builder --x64 --publish never",
+    "dist:win:setup": "electron-builder --win nsis --x64 --publish never",
+    "dist:win:portable": "electron-builder --win portable --x64 --publish never"
   },
   "devDependencies": {
     "electron": "45.3.2",
