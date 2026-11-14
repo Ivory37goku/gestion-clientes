@@ -3,99 +3,45 @@
 
   const KEY = 'gestion_clientes_data_v1';
   const CLOUD_TABLE = 'gestion_clientes';
-  const CLOUD_SETUP_SQL = String.raw`-- IVORY37: instalación idempotente del proyecto Supabase compartido.
--- Control Laboral y Gestión Clientes usan el mismo inicio de sesión,
--- pero guardan sus datos en tablas distintas y privadas por usuario.
--- Ejecutar una vez (o volver a ejecutar sin borrar los datos existentes)
--- en Supabase → SQL Editor.
+  const CLOUD_SETUP_SQL = String.raw`-- Añade la tabla que necesita Gestión Clientes al proyecto Supabase existente.
+-- No modifica ni borra la tabla ivory37_sync de Control Laboral.
+-- Se puede ejecutar más de una vez sin borrar datos.
 
-begin;
-
--- Control Laboral: conserva el esquema y los datos actuales.
-create table if not exists public.ivory37_sync (
-  user_id uuid primary key references auth.users (id) on delete cascade,
-  payload jsonb not null default '{"jornadas":[],"viajes":[],"pagos":[],"ajustes":[]}'::jsonb,
-  revision bigint not null default 1,
-  updated_at timestamptz not null default now()
-);
-alter table public.ivory37_sync add column if not exists payload jsonb not null default '{"jornadas":[],"viajes":[],"pagos":[],"ajustes":[]}'::jsonb;
-alter table public.ivory37_sync add column if not exists revision bigint not null default 1;
-alter table public.ivory37_sync add column if not exists updated_at timestamptz not null default now();
-alter table public.ivory37_sync enable row level security;
-revoke all on table public.ivory37_sync from public, anon, authenticated;
-grant select, insert, update on table public.ivory37_sync to authenticated;
-
-drop policy if exists "Users can read their own IVORY37 data" on public.ivory37_sync;
-drop policy if exists "Users can create their own IVORY37 data" on public.ivory37_sync;
-drop policy if exists "Users can update their own IVORY37 data" on public.ivory37_sync;
-create policy "Users can read their own IVORY37 data" on public.ivory37_sync
-  for select to authenticated using ((select auth.uid()) = user_id);
-create policy "Users can create their own IVORY37 data" on public.ivory37_sync
-  for insert to authenticated with check ((select auth.uid()) = user_id);
-create policy "Users can update their own IVORY37 data" on public.ivory37_sync
-  for update to authenticated using ((select auth.uid()) = user_id)
-  with check ((select auth.uid()) = user_id);
-
-create or replace function public.ivory37_sync_touch_row()
-returns trigger
-language plpgsql
-set search_path = ''
-as $$
-begin
-  new.updated_at := now();
-  if tg_op = 'UPDATE' then
-    new.revision := old.revision + 1;
-  end if;
-  return new;
-end;
-$$;
-drop trigger if exists ivory37_sync_touch on public.ivory37_sync;
-create trigger ivory37_sync_touch before insert or update on public.ivory37_sync
-  for each row execute function public.ivory37_sync_touch_row();
-
--- Gestión Clientes: cartera, leads, obras, presupuestos y tareas.
 create table if not exists public.gestion_clientes (
   user_id uuid primary key references auth.users (id) on delete cascade,
   payload jsonb not null default '{}'::jsonb,
   updated_at timestamptz not null default now()
 );
-alter table public.gestion_clientes add column if not exists payload jsonb not null default '{}'::jsonb;
-alter table public.gestion_clientes add column if not exists updated_at timestamptz not null default now();
+
+alter table public.gestion_clientes
+  add column if not exists payload jsonb not null default '{}'::jsonb;
+alter table public.gestion_clientes
+  add column if not exists updated_at timestamptz not null default now();
 alter table public.gestion_clientes enable row level security;
+
 revoke all on table public.gestion_clientes from public, anon, authenticated;
 grant select, insert, update on table public.gestion_clientes to authenticated;
 
--- Retira también las políticas de la primera versión de Gestión Clientes,
--- para que no quede ninguna regla antigua más permisiva.
 drop policy if exists "Users can read their own company data" on public.gestion_clientes;
 drop policy if exists "Users can create their own company data" on public.gestion_clientes;
 drop policy if exists "Users can update their own company data" on public.gestion_clientes;
 drop policy if exists "Users can read their own Gestión Clientes data" on public.gestion_clientes;
 drop policy if exists "Users can create their own Gestión Clientes data" on public.gestion_clientes;
 drop policy if exists "Users can update their own Gestión Clientes data" on public.gestion_clientes;
-create policy "Users can read their own Gestión Clientes data" on public.gestion_clientes
-  for select to authenticated using ((select auth.uid()) = user_id);
-create policy "Users can create their own Gestión Clientes data" on public.gestion_clientes
-  for insert to authenticated with check ((select auth.uid()) = user_id);
-create policy "Users can update their own Gestión Clientes data" on public.gestion_clientes
-  for update to authenticated using ((select auth.uid()) = user_id)
+
+create policy "Users can read their own Gestión Clientes data"
+  on public.gestion_clientes for select to authenticated
+  using ((select auth.uid()) = user_id);
+create policy "Users can create their own Gestión Clientes data"
+  on public.gestion_clientes for insert to authenticated
+  with check ((select auth.uid()) = user_id);
+create policy "Users can update their own Gestión Clientes data"
+  on public.gestion_clientes for update to authenticated
+  using ((select auth.uid()) = user_id)
   with check ((select auth.uid()) = user_id);
 
--- Activa actualizaciones en tiempo real en ambas tablas si la publicación existe.
-do $$
-begin
-  if exists (select 1 from pg_publication where pubname = 'supabase_realtime') then
-    if not exists (select 1 from pg_publication_tables where pubname = 'supabase_realtime' and schemaname = 'public' and tablename = 'ivory37_sync') then
-      alter publication supabase_realtime add table public.ivory37_sync;
-    end if;
-    if not exists (select 1 from pg_publication_tables where pubname = 'supabase_realtime' and schemaname = 'public' and tablename = 'gestion_clientes') then
-      alter publication supabase_realtime add table public.gestion_clientes;
-    end if;
-  end if;
-end;
-$$;
-
-commit;`;
+-- Actualiza la caché de esquema de PostgREST inmediatamente.
+notify pgrst, 'reload schema';`;
   const COLLECTIONS = ['leads', 'clients', 'works', 'tasks', 'quotes', 'invoices', 'payments', 'expenses', 'events', 'documents', 'team'];
   const TITLES = { dashboard: 'Resumen', myday: 'Mi día', agenda: 'Agenda', visits: 'Visitas', leads: 'Leads', clients: 'Clientes', works: 'Obras', tasks: 'Tareas', incidents: 'Incidencias', maintenance: 'Mantenimiento', checklists: 'Checklists', quotes: 'Presupuestos', finance: 'Facturas y gastos', documents: 'Documentos', reports: 'Informes', team: 'Equipo', settings: 'Ajustes' };
   const TASK_CATEGORIES = ['General', 'Incidencia', 'Mantenimiento', 'Checklist'];
@@ -634,9 +580,9 @@ commit;`;
     let projectRef = '';
     try { projectRef = new URL(cloudConfig.url || '').hostname.split('.')[0]; } catch (_) {}
     const sqlEditorUrl = projectRef ? 'https://supabase.com/dashboard/project/' + encodeURIComponent(projectRef) + '/sql/new' : 'https://supabase.com/dashboard';
-    const setupActions = '<div class="cloud-setup-actions"><button type="button" class="btn btn-sm" data-action="cloud-setup">Descargar SQL compartido para las dos apps</button><a class="btn btn-sm" href="' + esc(sqlEditorUrl) + '" target="_blank" rel="noopener">Abrir Editor SQL ↗</a></div>';
+    const setupActions = '<div class="cloud-setup-actions"><button type="button" class="btn btn-sm" data-action="cloud-setup">Descargar SQL de Gestión Clientes</button><a class="btn btn-sm" href="' + esc(sqlEditorUrl) + '" target="_blank" rel="noopener">Abrir Editor SQL ↗</a></div>';
     const cloudWarning = cloudProblem ? '<div class="cloud-alert" role="alert"><strong>Hay que revisar la conexión</strong><p>' + esc(cloudProblem) + '</p>' + (cloudSetupRequired ? setupActions : '') + '</div>' : '';
-    const cloudSetupHelp = !cloudUser && !cloudProblem ? '<div class="cloud-setup-help"><strong>Conecta las dos aplicaciones</strong><ol><li>Usa el mismo correo y contraseña en Gestión Clientes y Control Laboral.</li><li>Ejecuta una vez el SQL compartido para preparar las dos tablas privadas.</li><li>Confirma el correo si Supabase te lo solicita.</li></ol>' + setupActions + '</div>' : '';
+    const cloudSetupHelp = !cloudUser && !cloudProblem ? '<div class="cloud-setup-help"><strong>Prepara esta app en el proyecto compartido</strong><ol><li>Usa el mismo correo y contraseña que en Control Laboral.</li><li>Ejecuta el SQL de Gestión Clientes una vez; crea únicamente su tabla privada y recarga la caché del esquema.</li><li>Confirma el correo si Supabase te lo solicita.</li></ol>' + setupActions + '</div>' : '';
     const cloudPanel = '<div class="card"><div class="card-head"><div><h2>Sincronización privada</h2><p>La cuenta sirve en ambas apps; cada una conserva sus datos en una tabla independiente.</p></div><span class="badge ' + (cloudProblem ? 'yellow' : cloudUser ? 'green' : '') + '">' + esc(cloudUser ? cloudUser.email : cloudProblem ? 'Requiere atención' : 'Desconectado') + '</span></div>' + cloudWarning +
       (cloudUser ? '<p class="modal-note">Los cambios se sincronizan en segundo plano cuando hay conexión. Las copias locales siguen disponibles sin internet.</p><div class="head-actions"><button class="btn btn-primary" data-action="cloud-sync">Sincronizar ahora</button><button class="btn" data-action="cloud-logout">Cerrar sesión</button></div>' :
         '<p class="modal-note">El almacenamiento y las copias JSON funcionan sin cuenta. Para sincronizar entre móvil y ordenador, inicia sesión con la misma cuenta en las dos aplicaciones.</p><form id="cloud-form"><div class="fields"><div class="field"><label for="cloud-email">Correo</label><input id="cloud-email" name="email" type="email" value="' + esc(cloudEmailDraft) + '" autocomplete="username" required></div><div class="field"><label for="cloud-password">Contraseña</label><input id="cloud-password" name="password" type="password" autocomplete="current-password" minlength="6" required><span class="hint">El acceso admite la contraseña de 6 caracteres que ya creaste.</span></div></div><div class="head-actions" style="margin-top:12px"><button class="btn btn-primary" type="submit" data-cloud-mode="login">Iniciar sesión</button><button class="btn" type="submit" data-cloud-mode="signup">Crear cuenta</button></div></form>') +
@@ -1139,7 +1085,7 @@ commit;`;
     const code = String(error && error.code || '').toLowerCase();
     const message = String(error && error.message || error || '').toLowerCase();
     if (code === 'pgrst205' || code === '42p01' || /could not find the table|relation .* does not exist/.test(message)) {
-      return 'Falta crear la tabla privada de sincronización en Supabase. Descarga el SQL y ejecútalo una vez en el Editor SQL del proyecto.';
+      return 'Supabase no encuentra public.gestion_clientes. Descarga el SQL de esta app y ejecútalo una vez en el Editor SQL del proyecto; no modifica los datos de Control Laboral.';
     }
     if (/email_not_confirmed|email not confirmed|email confirmation/.test(code + ' ' + message)) {
       return 'Confirma el correo que Supabase envió al crear la cuenta. Después inicia sesión con esos mismos datos.';
@@ -1345,7 +1291,7 @@ commit;`;
     if (action === 'restore') { $('#restore-input').click(); return; }
     if (action === 'export-all') { exportAll(); return; }
     if (action === 'export-report') { exportReport(); return; }
-    if (action === 'cloud-setup') { download('ivory37-supabase-dos-aplicaciones.sql', CLOUD_SETUP_SQL, 'text/plain;charset=utf-8'); toast('SQL compartido descargado. Ejecútalo una vez para preparar las dos aplicaciones.', 'good'); return; }
+    if (action === 'cloud-setup') { download('gestion-clientes-supabase-setup.sql', CLOUD_SETUP_SQL, 'text/plain;charset=utf-8'); toast('SQL de Gestión Clientes descargado. Ejecútalo en Supabase y vuelve a sincronizar.', 'good'); return; }
     if (action === 'toggle-theme') { toggleTheme(); return; }
     if (action === 'print') { printPage(); return; }
     if (action === 'cloud-sync') { syncCloud(true); return; }

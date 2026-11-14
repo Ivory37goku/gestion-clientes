@@ -19,7 +19,7 @@ Laboral, pero conserva sus registros en una tabla separada.
 - Facturas, vencimientos, pagos parciales y saldo pendiente.
 - Gastos por obra, enlaces a documentos, equipo e informes.
 - Copias JSON, exportación CSV, impresión/PDF y trabajo sin conexión.
-- Sincronización opcional con una tabla propia de Supabase.
+- Sincronización opcional con `public.gestion_clientes`, una tabla propia y privada en el proyecto Supabase compartido.
 - Buscador global con acceso directo a cada ficha, vista de prioridades y modos oscuro y claro.
 - Identidad visual independiente con tonos verdes naturales y crema.
 
@@ -54,11 +54,12 @@ El workflow de Windows adjunta ambos EXE como artifacts de GitHub Actions.
 ## Sincronización en la nube
 
 En Ajustes → Datos y nube, usa el mismo correo y contraseña que en Control
-Laboral. Descarga el SQL compartido desde esa pantalla y ejecútalo una vez en el
-Editor SQL del proyecto Supabase. El script prepara `ivory37_sync` para Control
-Laboral y `gestion_clientes` para esta app, con acceso privado por usuario. La
-información de las dos aplicaciones permanece separada; solo comparten el acceso.
-Las dos siguen guardando cambios localmente si no hay conexión.
+Laboral. Descarga el SQL de Gestión Clientes desde esa pantalla y ejecútalo una
+vez en el Editor SQL del proyecto Supabase. Crea solamente
+`public.gestion_clientes`, con acceso privado por usuario, y solicita recargar la
+caché del esquema. No modifica `public.ivory37_sync` ni los datos de Control
+Laboral. Las dos apps comparten el acceso y mantienen sus registros separados;
+también siguen guardando cambios localmente si no hay conexión.
 
 Las invitaciones y confirmaciones de correo de Supabase dependen de las URL
 permitidas en Authentication → URL Configuration. Añade la dirección de esta
