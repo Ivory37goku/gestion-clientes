@@ -11,8 +11,8 @@
     "dist:win:portable": "electron-builder --win portable --x64"
   },
   "devDependencies": {
-    "electron": "^45.3.2",
-    "electron-builder": "^26.18.0"
+    "electron": "45.3.2",
+    "electron-builder": "26.18.0"
   },
   "build": {
     "appId": "com.ivory37.gestionclientes.desktop",
