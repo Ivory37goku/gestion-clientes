@@ -1,0 +1,10 @@
+node_modules/
+desktop-dist/
+android-app/.gradle/
+android-app/.idea/
+android-app/build/
+android-app/app/build/
+android-app/local.properties
+*.jks
+*.keystore
+*.log

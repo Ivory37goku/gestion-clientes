@@ -1,0 +1,6 @@
+<?xml version='1.0' encoding='utf-8'?>
+<resources>
+    <string name='app_name'>Gestión Clientes</string>
+    <string name='notification_channel_name'>Avisos de Gestión Clientes</string>
+    <string name='notification_channel_description'>Recordatorios de tareas y seguimientos mientras la aplicación está abierta.</string>
+</resources>

@@ -1,0 +1,66 @@
+<!doctype html>
+<html lang="es">
+<head>
+  <meta charset="utf-8">
+  <meta name="viewport" content="width=device-width, initial-scale=1, viewport-fit=cover">
+  <meta name="color-scheme" content="dark">
+  <meta name="theme-color" content="#0b1220">
+  <meta name="description" content="Gestiona leads, clientes, obras, tareas y finanzas de tu empresa.">
+  <meta name="application-name" content="Gestión Clientes">
+  <link rel="manifest" href="./manifest.json">
+  <link rel="icon" href="./icon-192.png">
+  <link rel="apple-touch-icon" href="./icon-192.png">
+  <link rel="stylesheet" href="./styles.css">
+  <title>Gestión Clientes</title>
+</head>
+<body>
+  <a class="skip" href="#main">Saltar al contenido</a>
+  <div class="app-shell">
+    <aside class="sidebar" id="sidebar">
+      <a class="brand" href="#dashboard" data-view="dashboard" aria-label="Gestión Clientes, inicio">
+        <span class="brand-mark">37</span>
+        <span><strong>GESTIÓN</strong><small>CLIENTES · OBRAS</small></span>
+      </a>
+      <div class="company-chip"><span class="live-dot"></span><span id="company-name-side">Mi empresa</span></div>
+      <nav class="nav" aria-label="Navegación principal">
+        <p class="nav-caption">GENERAL</p>
+        <button class="nav-item active" data-view="dashboard"><span class="nav-icon">⌂</span>Resumen</button>
+        <button class="nav-item" data-view="agenda"><span class="nav-icon">◷</span>Agenda<span class="nav-count" id="agenda-count"></span></button>
+        <p class="nav-caption">COMERCIAL</p>
+        <button class="nav-item" data-view="leads"><span class="nav-icon">✳</span>Leads<span class="nav-count" id="leads-count"></span></button>
+        <button class="nav-item" data-view="clients"><span class="nav-icon">♙</span>Clientes</button>
+        <button class="nav-item" data-view="works"><span class="nav-icon">▦</span>Obras</button>
+        <button class="nav-item" data-view="tasks"><span class="nav-icon">☷</span>Tareas<span class="nav-count" id="tasks-count"></span></button>
+        <p class="nav-caption">ADMINISTRACIÓN</p>
+        <button class="nav-item" data-view="quotes"><span class="nav-icon">▤</span>Presupuestos</button>
+        <button class="nav-item" data-view="finance"><span class="nav-icon">€</span>Facturas y gastos</button>
+        <button class="nav-item" data-view="documents"><span class="nav-icon">▧</span>Documentos</button>
+        <button class="nav-item" data-view="reports"><span class="nav-icon">▥</span>Informes</button>
+        <p class="nav-caption">EMPRESA</p>
+        <button class="nav-item" data-view="settings"><span class="nav-icon">⚙</span>Ajustes y equipo</button>
+      </nav>
+      <div class="sidebar-bottom">
+        <div class="sync-pill" id="sync-pill"><span class="sync-dot"></span><span id="sync-label">Guardado en este dispositivo</span></div>
+        <button class="profile-mini" data-view="settings"><span class="avatar" id="user-avatar">37</span><span><strong id="user-name-side">Tu perfil</strong><small>Configuración</small></span><span class="more">···</span></button>
+      </div>
+    </aside>
+    <main class="main" id="main">
+      <header class="topbar">
+        <button class="icon-btn mobile-menu" id="menu-toggle" aria-label="Abrir menú">☰</button>
+        <div class="breadcrumbs"><span>GESTIÓN CLIENTES</span><b>/</b><strong id="crumb-title">Resumen</strong></div>
+        <div class="topbar-actions">
+          <span class="today-label" id="today-label"></span>
+          <button class="icon-btn" data-view="agenda" aria-label="Abrir agenda">◷</button>
+          <button class="avatar avatar-top" data-view="settings" id="user-avatar-top">37</button>
+        </div>
+      </header>
+      <div id="view-root" class="view-root" aria-live="polite"></div>
+    </main>
+  </div>
+  <div id="modal-root"></div>
+  <div id="toast-root" class="toast-root" aria-live="polite"></div>
+  <script src="./supabase-config.js"></script>
+  <script src="./vendor/supabase.js"></script>
+  <script src="./app.js"></script>
+</body>
+</html>
