@@ -29,3 +29,42 @@ html{scroll-behavior:smooth}body{margin:0;min-height:100vh;background:radial-gra
 @media(max-width:420px){.kpis{gap:8px}.kpi{padding:12px}.kpi-label{font-size:8px}.kpi-value{font-size:20px}.hero h1{font-size:24px}.hero-actions{width:100%}.hero-actions .btn{flex:1}.row-item{padding:9px}.row-title{font-size:11px}}
 @media(prefers-reduced-motion:reduce){*,*::before,*::after{animation:none!important;transition:none!important;scroll-behavior:auto!important}}
 @media print{body{background:#fff;color:#111}.sidebar,.topbar,.head-actions,.btn,.nav{display:none!important}.app-shell{display:block}.main{padding:0}.view-root,.card,.kpi,.row-item{background:#fff;color:#111;box-shadow:none;border-color:#ddd}.muted,.page-sub,.row-sub,.kpi-label{color:#555}.badge{color:#111;border-color:#aaa}}
+
+.quote-editor{margin-top:16px;padding-top:16px;border-top:1px solid var(--line)}
+.quote-editor h3,.quote-breakdown h3{margin:0;font-size:13px;letter-spacing:-.01em}
+.quote-editor .card-head{align-items:flex-start}
+.quote-editor .card-head p,.quote-breakdown .card-head p{margin:4px 0 0;color:var(--muted);font-size:10px}
+.quote-line-list{display:grid;gap:10px}
+.quote-line-card{padding:12px;border:1px solid var(--line-soft);border-radius:12px;background:rgba(255,255,255,.018)}
+.quote-line-grid{display:grid;grid-template-columns:repeat(6,minmax(0,1fr));gap:10px;align-items:end}
+.quote-line-grid .quote-description{grid-column:span 2}
+.quote-line-total-wrap{display:flex;flex-direction:column;gap:5px;min-width:0;padding-bottom:9px;color:var(--muted);font-size:9px}
+.quote-line-total-wrap strong{color:var(--text);font-size:12px;font-variant-numeric:tabular-nums}
+.quote-line-actions{display:flex;align-items:center;justify-content:space-between;gap:8px;margin-top:6px}
+.quote-summary{display:grid;gap:7px;width:min(360px,100%);margin:13px 0 0 auto;padding:12px;border:1px solid var(--line-soft);border-radius:12px;background:rgba(255,255,255,.025)}
+.quote-summary>div{display:flex;justify-content:space-between;gap:15px;color:var(--muted);font-size:10px}
+.quote-summary strong{color:var(--text);font-variant-numeric:tabular-nums}
+.quote-summary .quote-summary-total{padding-top:8px;border-top:1px solid var(--line);color:var(--text);font-weight:800;font-size:12px}
+.quote-summary-total strong{color:var(--brand);font-size:15px}
+.quote-breakdown{margin-top:16px}
+.quote-breakdown .table-wrap{margin-top:10px}
+.quote-total-row th{color:#111;background:#eef2f7;font-weight:800}
+.quote-legacy-note{margin-top:14px;padding:12px;border:1px dashed var(--line);border-radius:10px;color:var(--muted);font-size:10px}
+@media(max-width:740px){.quote-editor .card-head{flex-direction:column}.quote-editor .card-head .btn{width:100%}.quote-line-grid{grid-template-columns:repeat(2,minmax(0,1fr))}.quote-line-grid .quote-description{grid-column:1/-1}.quote-line-total-wrap{padding:4px 0 8px}}
+@media print{
+  body:has(#modal-root .quote-breakdown) #main{display:none!important}
+  #modal-root .modal-backdrop{position:static;inset:auto;display:block;padding:0;background:#fff;backdrop-filter:none}
+  #modal-root .modal{width:100%;max-height:none;overflow:visible;border:0;border-radius:0;background:#fff;color:#111;box-shadow:none}
+  #modal-root .modal-head,#modal-root .modal-body{position:static;padding:12px 0;background:#fff;color:#111;backdrop-filter:none}
+  #modal-root .modal-head{border-bottom:1px solid #bbb}
+  #modal-root .modal-head h2,#modal-root .quote-breakdown h3{color:#111}
+  #modal-root .close-btn{display:none!important}
+  #modal-root .modal-foot{display:none}
+  #modal-root .row-item,#modal-root .quote-line-card{background:#fff;color:#111;border-color:#ddd;box-shadow:none}
+  #modal-root .quote-breakdown .table-wrap{overflow:visible;border-color:#bbb}
+  #modal-root .quote-breakdown table{min-width:0}
+  #modal-root .quote-breakdown th,#modal-root .quote-breakdown td{color:#111;border-color:#ddd}
+  #modal-root .quote-summary{background:#fff;border-color:#bbb}
+  #modal-root .quote-summary span,#modal-root .quote-summary strong,#modal-root .quote-line-total-wrap strong{color:#111}
+  #modal-root .quote-total-row th{background:#eee}
+}

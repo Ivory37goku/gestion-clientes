@@ -141,7 +141,11 @@
   function clientName(id) { const x = data.clients.find(r => r.id === id); return x ? (x.company || x.name) : ''; }
   function workName(id) { const x = data.works.find(r => r.id === id); return x ? x.name : ''; }
   function teamName(id) { const x = data.team.find(r => r.id === id); return x ? x.name : ''; }
-  function total(row) { return Math.max(0, num(row.amount)) * (1 + Math.max(0, num(row.taxRate)) / 100); }
+  function roundMoney(value) { return Math.round((num(value) + Number.EPSILON) * 100) / 100; }
+  function quoteLineTotal(item) { return roundMoney(Math.max(0, num(item.quantity)) * Math.max(0, num(item.unitPrice))); }
+  function quoteBase(items) { return roundMoney((items || []).reduce((sum, item) => sum + quoteLineTotal(item), 0)); }
+  function taxAmount(row) { return roundMoney(Math.max(0, num(row.amount)) * Math.max(0, num(row.taxRate)) / 100); }
+  function total(row) { return roundMoney(Math.max(0, num(row.amount)) + taxAmount(row)); }
   function paidFor(invoice) { return data.payments.filter(p => p.invoiceId === invoice.id).reduce((s, p) => s + num(p.amount), 0); }
   function outstanding(invoice) { return Math.max(0, total(invoice) - paidFor(invoice)); }
   function statusClass(status) {
@@ -339,13 +343,20 @@
     }
     const cloudPanel = '<div class="card"><div class="card-head"><div><h2>Sincronización privada</h2><p>Usa tu cuenta para mantener una copia actualizada entre dispositivos.</p></div><span class="badge ' + (cloudUser ? 'green' : '') + '">' + esc(cloudUser ? cloudUser.email : 'Desconectado') + '</span></div>' +
       (cloudUser ? '<p class="modal-note">Los cambios se sincronizan en segundo plano cuando hay conexión. Las copias locales siguen disponibles sin internet.</p><div class="head-actions"><button class="btn btn-primary" data-action="cloud-sync">Sincronizar ahora</button><button class="btn" data-action="cloud-logout">Cerrar sesión</button></div>' :
-        '<p class="modal-note">El almacenamiento y las copias JSON funcionan sin cuenta. Para sincronizar, crea una cuenta privada o inicia sesión.</p><form id="cloud-form"><div class="fields"><div class="field"><label for="cloud-email">Correo</label><input id="cloud-email" name="email" type="email" autocomplete="username" required></div><div class="field"><label for="cloud-password">Contraseña</label><input id="cloud-password" name="password" type="password" autocomplete="current-password" minlength="8" required></div></div><div class="head-actions" style="margin-top:12px"><button class="btn btn-primary" type="submit" data-cloud-mode="login">Iniciar sesión</button><button class="btn" type="submit" data-cloud-mode="signup">Crear cuenta</button></div></form>') +
+        '<p class="modal-note">El almacenamiento y las copias JSON funcionan sin cuenta. Para sincronizar, crea una cuenta privada o inicia sesión.</p><form id="cloud-form"><div class="fields"><div class="field"><label for="cloud-email">Correo</label><input id="cloud-email" name="email" type="email" autocomplete="username" required></div><div class="field"><label for="cloud-password">Contraseña</label><input id="cloud-password" name="password" type="password" autocomplete="current-password" minlength="6" required><span class="hint">El acceso admite la contraseña de 6 caracteres que ya creaste.</span></div></div><div class="head-actions" style="margin-top:12px"><button class="btn btn-primary" type="submit" data-cloud-mode="login">Iniciar sesión</button><button class="btn" type="submit" data-cloud-mode="signup">Crear cuenta</button></div></form>') +
       '<p class="modal-note" style="margin-top:14px">La sincronización necesita configurar una tabla propia en Supabase. Consulta <code>supabase-setup.sql</code>.</p></div>';
     const dataPanel = '<div class="card"><div class="card-head"><div><h2>Copias y exportaciones</h2><p>Conserva tus datos o llévalos a otra instalación.</p></div></div><div class="head-actions"><button class="btn btn-primary" data-action="backup">Descargar copia JSON</button><button class="btn" data-action="restore">Restaurar copia</button><button class="btn" data-action="export-all">Exportar registros CSV</button><input id="restore-input" type="file" accept="application/json,.json" hidden></div><p class="modal-note" style="margin-top:12px">La copia JSON incluye todos los registros, relaciones, configuración e historial de cobros.</p></div>';
     return header('DATOS', 'Ajustes y equipo', 'Copias de seguridad y sincronización en tus dispositivos.') + nav + '<div class="stack">' + dataPanel + cloudPanel + card('Almacenamiento', '<div class="row-item"><div class="row-main"><div class="row-title">Datos locales</div><div class="row-sub">Guardados automáticamente en este dispositivo.</div></div><span class="badge green">Activo</span></div>', 'Sin conexión disponible') + '</div>';
   }
   function settingsField(name, label, value, type, size, placeholder) {
     return '<div class="field ' + (size || '') + '"><label for="co-' + name + '">' + esc(label) + '</label><input id="co-' + name + '" name="' + name + '" type="' + (type || 'text') + '" value="' + esc(value == null ? '' : value) + '"' + (placeholder ? ' placeholder="' + esc(placeholder) + '"' : '') + '></div>';
+  }
+
+  function quoteBreakdown(item) {
+    const items = Array.isArray(item.items) ? item.items : [];
+    if (!items.length) return '<div class="quote-legacy-note">Este registro todavía no tiene partidas detalladas. Pulsa «Editar» para añadir horas, desplazamientos y materiales.</div>';
+    const rows = items.map(line => '<tr><td>' + esc(line.category || 'Otros') + '</td><td>' + esc(line.description || '') + '</td><td class="numeric">' + esc(num(line.quantity).toLocaleString('es-ES')) + '</td><td>' + esc(line.unit || 'ud') + '</td><td class="numeric">' + esc(money(line.unitPrice)) + '</td><td class="numeric">' + esc(money(quoteLineTotal(line))) + '</td></tr>').join('');
+    return '<section class="quote-breakdown"><div class="card-head"><div><h3>Desglose de partidas</h3><p>Mano de obra, desplazamientos, materiales y otros conceptos.</p></div></div><div class="table-wrap"><table><thead><tr><th>Tipo</th><th>Descripción</th><th class="numeric">Cantidad</th><th>Unidad</th><th class="numeric">Precio / unidad</th><th class="numeric">Importe</th></tr></thead><tbody>' + rows + '</tbody><tfoot><tr><th colspan="5">Base imponible</th><th class="numeric">' + esc(money(item.amount)) + '</th></tr><tr><th colspan="5">' + esc(item.taxName || 'IGIC') + ' (' + esc(num(item.taxRate)) + '%)</th><th class="numeric">' + esc(money(taxAmount(item))) + '</th></tr><tr class="quote-total-row"><th colspan="5">TOTAL</th><th class="numeric">' + esc(money(total(item))) + '</th></tr></tfoot></table></div></section>';
   }
 
   function renderDetail(type, id) {
@@ -360,8 +371,8 @@
     if (type === 'client') { add('Contacto', item.name); add('CIF / NIF', item.taxId); add('Teléfono', item.phone); add('Correo', item.email); add('Dirección', item.address); add('Notas', item.notes); }
     if (type === 'work') { add('Cliente', selected(data.clients, item.clientId)); add('Estado', item.status); add('Dirección', item.address); add('Inicio', dateFmt(item.start)); add('Entrega prevista', dateFmt(item.end)); add('Presupuesto', money(item.budget)); add('Avance', num(item.progress) + '%'); add('Responsable', teamName(item.owner)); add('Notas', item.notes); }
     if (type === 'task') { add('Estado', item.status); add('Prioridad', item.priority); add('Obra', workName(item.workId)); add('Cliente', selected(data.clients, item.clientId)); add('Fecha límite', dateFmt(item.due)); add('Responsable', teamName(item.owner)); add('Descripción', item.description); }
-    if (type === 'quote') { add('Cliente', selected(data.clients, item.clientId)); add('Obra', workName(item.workId)); add('Estado', item.status); add('Fecha', dateFmt(item.date)); add('Válido hasta', dateFmt(item.validUntil)); add('Base imponible', money(item.amount)); add(item.taxName || (num(item.taxRate) === 21 ? 'Impuesto anterior' : 'IGIC'), num(item.taxRate) + '%'); add('Total', money(total(item))); add('Descripción', item.notes); }
-    if (type === 'invoice') { add('Cliente', selected(data.clients, item.clientId)); add('Obra', workName(item.workId)); add('Estado', item.status); add('Emisión', dateFmt(item.date)); add('Vencimiento', dateFmt(item.due)); add('Base imponible', money(item.amount)); add(item.taxName || (num(item.taxRate) === 21 ? 'Impuesto anterior' : 'IGIC'), num(item.taxRate) + '%'); add('Total', money(total(item))); add('Cobrado', money(paidFor(item))); add('Pendiente', money(outstanding(item))); add('Descripción', item.notes); }
+    if (type === 'quote') { add('Cliente', selected(data.clients, item.clientId)); add('Obra', workName(item.workId)); add('Estado', item.status); add('Fecha', dateFmt(item.date)); add('Válido hasta', dateFmt(item.validUntil)); if (!Array.isArray(item.items) || !item.items.length) { add('Base imponible', money(item.amount)); add(item.taxName || (num(item.taxRate) === 21 ? 'Impuesto anterior' : 'IGIC'), num(item.taxRate) + '%'); add('Total', money(total(item))); } add('Descripción y condiciones', item.notes); }
+    if (type === 'invoice') { add('Cliente', selected(data.clients, item.clientId)); add('Obra', workName(item.workId)); add('Estado', item.status); add('Emisión', dateFmt(item.date)); add('Vencimiento', dateFmt(item.due)); if (!Array.isArray(item.items) || !item.items.length) { add('Base imponible', money(item.amount)); add(item.taxName || (num(item.taxRate) === 21 ? 'Impuesto anterior' : 'IGIC'), num(item.taxRate) + '%'); add('Total', money(total(item))); } add('Cobrado', money(paidFor(item))); add('Pendiente', money(outstanding(item))); add('Descripción', item.notes); }
     if (type === 'expense') { add('Categoría', item.category); add('Proveedor', item.vendor); add('Fecha', dateFmt(item.date)); add('Importe', money(item.amount)); add('Obra', workName(item.workId)); add('Notas', item.notes); }
     if (type === 'event') { add('Fecha', dateFmt(item.date)); add('Hora', item.time); add('Tipo', item.kind); add('Responsable', teamName(item.owner)); add('Notas', item.notes); }
     if (type === 'document') { add('Tipo', item.kind); add('Relacionado con', workName(item.workId) || selected(data.clients, item.clientId)); add('Enlace', item.url); add('Notas', item.notes); }
@@ -369,8 +380,9 @@
     if (type === 'payment') { add('Factura', selected(data.invoices, item.invoiceId)); add('Fecha', dateFmt(item.date)); add('Método', item.method); add('Importe', money(item.amount)); add('Notas', item.notes); }
     const related = type === 'client' ? data.works.filter(x => x.clientId === id).map(x => '<button class="row-item" data-action="detail" data-type="work" data-id="' + esc(x.id) + '"><span class="row-main"><span class="row-title">' + esc(x.name) + badge(x.status) + '</span><span class="row-sub">' + esc(money(x.budget)) + '</span></span></button>').join('')
       : type === 'work' ? data.tasks.filter(x => x.workId === id).map(x => '<button class="row-item" data-action="detail" data-type="task" data-id="' + esc(x.id) + '"><span class="row-main"><span class="row-title">' + esc(x.title) + badge(x.status) + '</span><span class="row-sub">' + esc(x.due ? dateFmt(x.due) : 'Sin fecha') + '</span></span></button>').join('') : '';
-    const extraActions = type === 'lead' && !item.clientId ? '<button class="btn btn-primary btn-sm" data-action="convert-lead" data-id="' + esc(id) + '">Convertir en cliente + obra</button>' : type === 'quote' && item.status !== 'Rechazada' ? '<button class="btn btn-primary btn-sm" data-action="quote-to-invoice" data-id="' + esc(id) + '">Crear factura</button>' : type === 'invoice' && outstanding(item) > 0 ? '<button class="btn btn-primary btn-sm" data-action="payment" data-id="' + esc(id) + '">Registrar cobro</button>' : '';
-    const modal = '<div class="modal-backdrop" data-action="backdrop"><section class="modal" role="dialog" aria-modal="true" aria-labelledby="detail-title"><div class="modal-head"><h2 id="detail-title">' + esc(title) + '</h2><button class="close-btn" data-action="close-modal" aria-label="Cerrar">×</button></div><div class="modal-body"><div class="list">' + facts.join('') + '</div>' + (related ? '<div style="margin-top:16px"><div class="card-head"><h2>' + (type === 'client' ? 'Obras del cliente' : 'Tareas de la obra') + '</h2></div><div class="list">' + related + '</div></div>' : '') + '</div><div class="modal-foot"><div>' + extraActions + '</div><div><button class="btn btn-danger btn-sm" data-action="delete" data-type="' + type + '" data-id="' + esc(id) + '">Eliminar</button><button class="btn btn-primary btn-sm" data-action="edit" data-type="' + type + '" data-id="' + esc(id) + '">Editar</button></div></div></section></div>';
+    const extraActions = type === 'lead' && !item.clientId ? '<button class="btn btn-primary btn-sm" data-action="convert-lead" data-id="' + esc(id) + '">Convertir en cliente + obra</button>' : type === 'quote' ? '<button class="btn btn-sm" data-action="print">Imprimir / guardar PDF</button>' + (item.status !== 'Rechazada' ? '<button class="btn btn-primary btn-sm" data-action="quote-to-invoice" data-id="' + esc(id) + '">Crear factura</button>' : '') : type === 'invoice' && outstanding(item) > 0 ? '<button class="btn btn-primary btn-sm" data-action="payment" data-id="' + esc(id) + '">Registrar cobro</button>' : '';
+    const breakdown = ['quote', 'invoice'].includes(type) && Array.isArray(item.items) && item.items.length ? quoteBreakdown(item) : '';
+    const modal = '<div class="modal-backdrop" data-action="backdrop"><section class="modal" role="dialog" aria-modal="true" aria-labelledby="detail-title"><div class="modal-head"><h2 id="detail-title">' + esc(title) + '</h2><button class="close-btn" data-action="close-modal" aria-label="Cerrar">×</button></div><div class="modal-body"><div class="list">' + facts.join('') + '</div>' + breakdown + (related ? '<div style="margin-top:16px"><div class="card-head"><h2>' + (type === 'client' ? 'Obras del cliente' : 'Tareas de la obra') + '</h2></div><div class="list">' + related + '</div></div>' : '') + '</div><div class="modal-foot"><div>' + extraActions + '</div><div><button class="btn btn-danger btn-sm" data-action="delete" data-type="' + type + '" data-id="' + esc(id) + '">Eliminar</button><button class="btn btn-primary btn-sm" data-action="edit" data-type="' + type + '" data-id="' + esc(id) + '">Editar</button></div></div></section></div>';
     $('#modal-root').innerHTML = modal;
   }
 
@@ -388,7 +400,7 @@
       ['title', 'Tarea', 'text', true], ['workId', 'Obra relacionada', 'work'], ['clientId', 'Cliente', 'client'], ['due', 'Fecha límite', 'date'], ['priority', 'Prioridad', 'select', false, ['Alta', 'Media', 'Baja']], ['status', 'Estado', 'select', false, STATUS.task], ['owner', 'Responsable', 'team'], ['description', 'Descripción', 'textarea', false, null, 'full']
     ],
     quote: [
-      ['title', 'Concepto / asunto', 'text', true], ['number', 'Número de presupuesto', 'text'], ['clientId', 'Cliente', 'client', true], ['workId', 'Obra relacionada', 'work'], ['date', 'Fecha', 'date'], ['validUntil', 'Válido hasta', 'date'], ['amount', 'Base imponible (€)', 'number', true], ['taxRate', 'IGIC (%)', 'number'], ['status', 'Estado', 'select', false, STATUS.quote], ['notes', 'Detalle y condiciones', 'textarea', false, null, 'full']
+      ['title', 'Concepto / asunto', 'text', true], ['number', 'Número de presupuesto', 'text'], ['clientId', 'Cliente', 'client', true], ['workId', 'Obra relacionada', 'work'], ['date', 'Fecha', 'date'], ['validUntil', 'Válido hasta', 'date'], ['taxRate', 'IGIC (%)', 'number'], ['status', 'Estado', 'select', false, STATUS.quote], ['notes', 'Detalle y condiciones', 'textarea', false, null, 'full']
     ],
     invoice: [
       ['title', 'Concepto / asunto', 'text', true], ['number', 'Número de factura', 'text'], ['clientId', 'Cliente', 'client', true], ['workId', 'Obra relacionada', 'work'], ['date', 'Fecha de emisión', 'date'], ['due', 'Fecha de vencimiento', 'date'], ['amount', 'Base imponible (€)', 'number', true], ['taxRate', 'IGIC (%)', 'number'], ['status', 'Estado', 'select', false, STATUS.invoice], ['notes', 'Detalle', 'textarea', false, null, 'full']
@@ -431,6 +443,83 @@
     return '<div class="field ' + (size || '') + '"><label for="' + id + '">' + esc(label) + '</label>' + control + '</div>';
   }
 
+  function quoteDefaultUnit(category) {
+    return ({ 'Mano de obra': 'horas', 'Desplazamiento': 'trayecto', 'Material': 'ud', 'Otros': 'ud' })[category] || 'ud';
+  }
+  function quoteLineMarkup(item) {
+    const category = item.category || 'Mano de obra';
+    const unit = item.unit == null ? quoteDefaultUnit(category) : String(item.unit);
+    const autoUnit = unit === quoteDefaultUnit(category) ? 'true' : 'false';
+    const categories = ['Mano de obra', 'Desplazamiento', 'Material', 'Otros'];
+    const lineId = 'quote-line-' + uid();
+    return '<article class="quote-line-card" data-quote-line-row><div class="quote-line-grid">' +
+      '<div class="field"><label for="' + lineId + '-category">Tipo de partida</label><select id="' + lineId + '-category" data-quote-field="category">' + categories.map(x => '<option' + (x === category ? ' selected' : '') + '>' + esc(x) + '</option>').join('') + '</select></div>' +
+      '<div class="field quote-description"><label for="' + lineId + '-description">Descripción</label><input id="' + lineId + '-description" data-quote-field="description" type="text" value="' + esc(item.description || '') + '" placeholder="Ej.: Instalación, desplazamiento a obra, cemento"></div>' +
+      '<div class="field"><label for="' + lineId + '-quantity">Cantidad</label><input id="' + lineId + '-quantity" data-quote-field="quantity" type="number" min="0.01" step="0.01" value="' + esc(item.quantity == null ? '' : item.quantity) + '" placeholder="0"></div>' +
+      '<div class="field"><label for="' + lineId + '-unit">Unidad</label><input id="' + lineId + '-unit" data-quote-field="unit" type="text" data-auto-unit="' + autoUnit + '" value="' + esc(unit) + '" placeholder="horas, km, ud"></div>' +
+      '<div class="field"><label for="' + lineId + '-price">Precio por unidad (€)</label><input id="' + lineId + '-price" data-quote-field="unitPrice" type="number" min="0" step="0.01" value="' + esc(item.unitPrice == null ? '' : item.unitPrice) + '" placeholder="0,00"></div>' +
+      '<div class="quote-line-total-wrap"><span>Importe de la partida</span><strong data-quote-line-total>0,00 €</strong></div>' +
+      '</div><div class="quote-line-actions"><span class="muted small">Cantidad × precio por unidad</span><button type="button" class="tiny-btn danger" data-action="remove-quote-line" aria-label="Quitar esta partida">Quitar partida</button></div></article>';
+  }
+  function quoteItemsForForm(item) {
+    if (Array.isArray(item.items) && item.items.length) return clone(item.items);
+    if (num(item.amount) > 0) return [{ category: 'Otros', description: item.title || 'Importe anterior sin desglose', quantity: 1, unit: 'servicio', unitPrice: num(item.amount) }];
+    return [{ category: 'Mano de obra', description: '', quantity: '', unit: 'horas', unitPrice: '' }];
+  }
+  function quoteEditorMarkup(items) {
+    return '<section class="quote-editor"><div class="card-head"><div><h3>Desglose del presupuesto</h3><p>Indica horas y tarifa, coste del desplazamiento y materiales por unidad.</p></div><button type="button" class="btn btn-sm" data-action="add-quote-line">＋ Añadir partida</button></div><div class="quote-line-list" data-quote-line-list>' + (items || []).map(quoteLineMarkup).join('') + '</div><div class="quote-summary"><div><span>Base imponible</span><strong data-quote-base>0,00 €</strong></div><div><span>IGIC (<b data-quote-tax-rate>7</b> %)</span><strong data-quote-tax>0,00 €</strong></div><div class="quote-summary-total"><span>Total</span><strong data-quote-total>0,00 €</strong></div></div><p class="modal-note">Los importes se calculan automáticamente. En los presupuestos antiguos, el importe actual se conserva como una partida editable.</p></section>';
+  }
+  function quoteItemsFromForm(form) {
+    const items = [];
+    let incomplete = false;
+    $$('.quote-line-card', form).forEach(row => {
+      const category = $('[data-quote-field="category"]', row).value;
+      const description = $('[data-quote-field="description"]', row).value.trim();
+      const quantityRaw = $('[data-quote-field="quantity"]', row).value.trim();
+      const unit = $('[data-quote-field="unit"]', row).value.trim();
+      const priceRaw = $('[data-quote-field="unitPrice"]', row).value.trim();
+      if (!description && !quantityRaw && !priceRaw) return;
+      const quantity = num(quantityRaw);
+      const unitPrice = num(priceRaw);
+      if (!description || !quantityRaw || !unit || !priceRaw || quantity <= 0 || unitPrice < 0) { incomplete = true; return; }
+      items.push({ category, description, quantity, unit, unitPrice });
+    });
+    if (incomplete) return { error: 'Completa la descripción, cantidad, unidad y precio de cada partida que hayas empezado.' };
+    if (!items.length) return { error: 'Añade al menos una partida detallada al presupuesto.' };
+    return { items };
+  }
+  function updateQuoteTotals(form) {
+    if (!form) return;
+    const rate = Math.max(0, num(($('[name="taxRate"]', form) || {}).value));
+    let base = 0;
+    $$('.quote-line-card', form).forEach(row => {
+      const quantity = Math.max(0, num(($('[data-quote-field="quantity"]', row) || {}).value));
+      const price = Math.max(0, num(($('[data-quote-field="unitPrice"]', row) || {}).value));
+      const lineTotal = quoteLineTotal({ quantity, unitPrice: price });
+      base += lineTotal;
+      const totalLabel = $('[data-quote-line-total]', row);
+      if (totalLabel) totalLabel.textContent = money(lineTotal);
+    });
+    base = roundMoney(base);
+    const tax = roundMoney(base * rate / 100);
+    const baseLabel = $('[data-quote-base]', form);
+    const taxLabel = $('[data-quote-tax]', form);
+    const totalLabel = $('[data-quote-total]', form);
+    const rateLabel = $('[data-quote-tax-rate]', form);
+    if (baseLabel) baseLabel.textContent = money(base);
+    if (taxLabel) taxLabel.textContent = money(tax);
+    if (totalLabel) totalLabel.textContent = money(base + tax);
+    if (rateLabel) rateLabel.textContent = String(rate).replace('.', ',');
+  }
+  function addQuoteLine(form) {
+    const list = $('[data-quote-line-list]', form);
+    if (!list) return;
+    list.insertAdjacentHTML('beforeend', quoteLineMarkup({ category: 'Otros', description: '', quantity: '', unit: 'ud', unitPrice: '' }));
+    updateQuoteTotals(form);
+    const description = $('[data-quote-field="description"]', list.lastElementChild);
+    if (description) description.focus();
+  }
+
   function openForm(type, id, preset) {
     const collection = TYPE_COLLECTION[type];
     if (!collection || !FIELDS[type]) return;
@@ -445,9 +534,15 @@
       if (type === 'event' || type === 'payment') item.date = item.date || today;
       if (type === 'team') item.active = true;
     }
+    if (type === 'quote') item.items = quoteItemsForForm(item);
+    const hasDetailedLines = type === 'quote' || (type === 'invoice' && Array.isArray(item.items) && item.items.length > 0);
+    const fieldContent = hasDetailedLines
+      ? '<div class="fields">' + FIELDS[type].filter(s => !['amount', 'notes'].includes(s[0])).map(s => fieldMarkup(s, item[s[0]])).join('') + '</div>' + quoteEditorMarkup(item.items) + '<div class="fields">' + fieldMarkup(FIELDS[type].find(s => s[0] === 'notes'), item.notes) + '</div>'
+      : '<div class="fields">' + FIELDS[type].map(s => fieldMarkup(s, item[s[0]])).join('') + '</div>';
     const title = id ? 'Editar ' + TYPE_LABEL[type] : TYPE_TITLE[type];
-    const form = '<div class="modal-backdrop" data-action="backdrop"><section class="modal" role="dialog" aria-modal="true" aria-labelledby="form-title"><div class="modal-head"><h2 id="form-title">' + esc(title) + '</h2><button class="close-btn" data-action="close-modal" aria-label="Cerrar">×</button></div><form id="entity-form" data-type="' + type + '" data-id="' + esc(id || '') + '"><div class="modal-body"><p class="modal-note">Los campos marcados son necesarios para guardar el registro.</p><div class="fields">' + FIELDS[type].map(s => fieldMarkup(s, item[s[0]])).join('') + '</div></div><div class="modal-foot"><div>' + (id ? '<button type="button" class="btn btn-danger btn-sm" data-action="delete" data-type="' + type + '" data-id="' + esc(id) + '">Eliminar</button>' : '') + '</div><div><button type="button" class="btn" data-action="close-modal">Cancelar</button><button type="submit" class="btn btn-primary">Guardar</button></div></div></form></section></div>';
+    const form = '<div class="modal-backdrop" data-action="backdrop"><section class="modal" role="dialog" aria-modal="true" aria-labelledby="form-title"><div class="modal-head"><h2 id="form-title">' + esc(title) + '</h2><button class="close-btn" data-action="close-modal" aria-label="Cerrar">×</button></div><form id="entity-form" data-type="' + type + '" data-id="' + esc(id || '') + '"><div class="modal-body"><p class="modal-note">Los campos marcados son necesarios para guardar el registro.</p>' + fieldContent + '</div><div class="modal-foot"><div>' + (id ? '<button type="button" class="btn btn-danger btn-sm" data-action="delete" data-type="' + type + '" data-id="' + esc(id) + '">Eliminar</button>' : '') + '</div><div><button type="button" class="btn" data-action="close-modal">Cancelar</button><button type="submit" class="btn btn-primary">Guardar</button></div></div></form></section></div>';
     $('#modal-root').innerHTML = form;
+    if (hasDetailedLines) updateQuoteTotals($('#entity-form'));
     const first = $('#entity-form input, #entity-form select, #entity-form textarea');
     if (first) setTimeout(() => first.focus(), 40);
   }
@@ -477,6 +572,12 @@
     if (type === 'document' && safeHref(values.url) === '#') {
       toast('Añade un enlace http o https válido para el documento.', 'bad');
       return;
+    }
+    if (['quote', 'invoice'].includes(type) && $('[data-quote-line-list]', form)) {
+      const detailed = quoteItemsFromForm(form);
+      if (detailed.error) { toast(detailed.error, 'bad'); return; }
+      values.items = detailed.items;
+      values.amount = quoteBase(detailed.items);
     }
     if (['quote', 'invoice'].includes(type) && !form.dataset.id) values.taxName = data.company.taxName || 'IGIC';
     if (type === 'invoice' && values.status === 'Pagada') values.status = 'Emitida';
@@ -540,7 +641,7 @@
     const q = data.quotes.find(x => x.id === id);
     if (!q) return;
     const time = nowIso();
-    const invoice = { id: uid(), title: q.title, number: '', clientId: q.clientId, workId: q.workId, date: today, due: '', amount: num(q.amount), taxName: q.taxName || data.company.taxName || 'IGIC', taxRate: num(q.taxRate), status: 'Borrador', notes: q.notes || 'Creada desde presupuesto ' + (q.number || q.title), createdAt: time, updatedAt: time, sourceQuoteId: q.id };
+    const invoice = { id: uid(), title: q.title, number: '', clientId: q.clientId, workId: q.workId, date: today, due: '', amount: num(q.amount), items: Array.isArray(q.items) ? clone(q.items) : [], taxName: q.taxName || data.company.taxName || 'IGIC', taxRate: num(q.taxRate), status: 'Borrador', notes: q.notes || 'Creada desde presupuesto ' + (q.number || q.title), createdAt: time, updatedAt: time, sourceQuoteId: q.id };
     if (!commitChange(() => {
       data.invoices.unshift(invoice);
       const currentQuote = data.quotes.find(x => x.id === id);
@@ -711,11 +812,26 @@
     groups.forEach(([name, rows]) => rows.forEach(x => lines.push([name, x.name || x.title || x.number || '', x.stage || x.status || '', selected(data.clients, x.clientId) || workName(x.workId) || '', x.amount == null ? '' : x.amount, x.date || x.due || x.createdAt || ''].map(csvEscape).join(';'))));
     download('gestion-clientes-informe-' + today + '.csv', '\ufeff' + lines.join('\r\n'), 'text/csv;charset=utf-8');
   }
-  function printPage() { window.print(); }
+  function printPage() {
+    if (window.AndroidBridge && typeof window.AndroidBridge.printReport === 'function') window.AndroidBridge.printReport();
+    else window.print();
+  }
 
   function handleAction(target) {
     const action = target.dataset.action;
     if (action === 'close-modal') { $('#modal-root').innerHTML = ''; return; }
+    if (action === 'add-quote-line') { addQuoteLine(target.closest('form')); return; }
+    if (action === 'remove-quote-line') {
+      const form = target.closest('form');
+      const row = target.closest('.quote-line-card');
+      const list = form && $('[data-quote-line-list]', form);
+      if (row && list) {
+        row.remove();
+        if (!list.children.length) list.innerHTML = quoteLineMarkup({ category: 'Mano de obra', description: '', quantity: '', unit: 'horas', unitPrice: '' });
+        updateQuoteTotals(form);
+      }
+      return;
+    }
     if (action === 'backdrop' && target === $('.modal-backdrop')) { $('#modal-root').innerHTML = ''; return; }
     if (action === 'new') { openForm(target.dataset.type); return; }
     if (action === 'edit') { openForm(target.dataset.type, target.dataset.id); return; }
@@ -781,10 +897,18 @@
       const input = $('#search-input');
       if (input) { input.focus(); input.setSelectionRange(caret, caret); }
     }
+    if (event.target.matches('[data-quote-field="unit"]')) event.target.dataset.autoUnit = 'false';
+    if (event.target.form && event.target.form.id === 'entity-form' && $('[data-quote-line-list]', event.target.form)) updateQuoteTotals(event.target.form);
   });
   document.addEventListener('change', (event) => {
     if (event.target.id === 'filter-select') { filterValue = event.target.value; render(); }
     if (event.target.id === 'restore-input') restoreFile(event.target.files && event.target.files[0]);
+    if (event.target.matches('[data-quote-field="category"]')) {
+      const row = event.target.closest('.quote-line-card');
+      const unit = row && $('[data-quote-field="unit"]', row);
+      if (unit && unit.dataset.autoUnit !== 'false') unit.value = quoteDefaultUnit(event.target.value);
+    }
+    if (event.target.form && event.target.form.id === 'entity-form' && $('[data-quote-line-list]', event.target.form)) updateQuoteTotals(event.target.form);
   });
   $('#menu-toggle').addEventListener('click', () => $('#sidebar').classList.toggle('open'));
   window.addEventListener('online', () => { if (cloudUser) syncCloud(false); });

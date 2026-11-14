@@ -11,7 +11,7 @@ Windows; no modifica ni comparte los datos de Control Laboral.
 - Obras con fechas, presupuesto, estado, avance y responsable.
 - Tareas por obra o cliente, con prioridades y vencimientos.
 - Agenda de visitas, citas, tareas y seguimientos.
-- Presupuestos con IGIC que se pueden convertir en facturas.
+- Presupuestos detallados con horas, tarifas, desplazamientos y materiales; cálculo e impresión/PDF con IGIC.
 - Facturas, vencimientos, pagos parciales y saldo pendiente.
 - Gastos por obra, enlaces a documentos, equipo e informes.
 - Copias JSON, exportación CSV, impresión/PDF y trabajo sin conexión.
