@@ -1,6 +1,6 @@
 'use strict';
 
-const CACHE = 'gestion-clientes-v4';
+const CACHE = 'gestion-clientes-v5';
 const ASSETS = [
   './',
   './index.html',
@@ -11,7 +11,8 @@ const ASSETS = [
   './vendor/supabase.js',
   './icon-192.png',
   './icon-512.png',
-  './icon-512-maskable.png'
+  './icon-512-maskable.png',
+  './brand-icon.svg'
 ];
 const ASSET_URLS = new Set(ASSETS.map(path => new URL(path, self.registration.scope).href));
 

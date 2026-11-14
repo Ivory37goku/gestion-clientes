@@ -3,12 +3,13 @@
 <head>
   <meta charset="utf-8">
   <meta name="viewport" content="width=device-width, initial-scale=1, viewport-fit=cover">
-  <meta name="color-scheme" content="dark">
-  <meta name="theme-color" content="#0b1220">
+  <meta name="color-scheme" content="dark light">
+  <meta name="theme-color" content="#0a0f0d">
   <meta name="description" content="Gestiona leads, clientes, obras, tareas y finanzas de tu empresa.">
   <meta name="application-name" content="Gestión Clientes">
   <link rel="manifest" href="./manifest.json">
-  <link rel="icon" href="./icon-192.png">
+  <link rel="icon" type="image/svg+xml" href="./brand-icon.svg">
+  <link rel="alternate icon" href="./icon-192.png">
   <link rel="apple-touch-icon" href="./icon-192.png">
   <link rel="stylesheet" href="./styles.css">
   <title>Gestión Clientes</title>
@@ -18,7 +19,7 @@
   <div class="app-shell">
     <aside class="sidebar" id="sidebar">
       <a class="brand" href="#dashboard" data-view="dashboard" aria-label="Gestión Clientes, inicio">
-        <span class="brand-mark">37</span>
+        <span class="brand-mark">GC</span>
         <span><strong>GESTIÓN</strong><small>CLIENTES · OBRAS</small></span>
       </a>
       <div class="company-chip"><span class="live-dot"></span><span id="company-name-side">Mi empresa</span></div>
@@ -41,17 +42,26 @@
       </nav>
       <div class="sidebar-bottom">
         <div class="sync-pill" id="sync-pill"><span class="sync-dot"></span><span id="sync-label">Guardado en este dispositivo</span></div>
-        <button class="profile-mini" data-view="settings"><span class="avatar" id="user-avatar">37</span><span><strong id="user-name-side">Tu perfil</strong><small>Configuración</small></span><span class="more">···</span></button>
+        <button class="profile-mini" data-view="settings"><span class="avatar" id="user-avatar">GC</span><span><strong id="user-name-side">Tu perfil</strong><small>Configuración</small></span><span class="more">···</span></button>
       </div>
     </aside>
+    <button type="button" class="sidebar-backdrop" data-action="close-sidebar" aria-label="Cerrar menú"></button>
     <main class="main" id="main">
       <header class="topbar">
         <button class="icon-btn mobile-menu" id="menu-toggle" aria-label="Abrir menú">☰</button>
         <div class="breadcrumbs"><span>GESTIÓN CLIENTES</span><b>/</b><strong id="crumb-title">Resumen</strong></div>
+        <div class="global-search">
+          <label class="sr-only" for="global-search-input">Buscar en tus registros</label>
+          <span class="global-search-icon" aria-hidden="true">⌕</span>
+          <input id="global-search-input" type="search" placeholder="Buscar leads, clientes, obras…" autocomplete="off" aria-controls="global-search-results" aria-expanded="false" aria-label="Buscar leads, clientes, obras y tareas">
+          <kbd class="global-search-shortcut">Ctrl K</kbd>
+          <div class="global-search-results" id="global-search-results" role="listbox" aria-label="Resultados de búsqueda" hidden></div>
+        </div>
         <div class="topbar-actions">
           <span class="today-label" id="today-label"></span>
-          <button class="icon-btn" data-view="agenda" aria-label="Abrir agenda">◷</button>
-          <button class="avatar avatar-top" data-view="settings" id="user-avatar-top">37</button>
+          <button class="icon-btn" id="theme-toggle" data-action="toggle-theme" aria-label="Activar modo claro" title="Activar modo claro">☼</button>
+          <button class="icon-btn agenda-shortcut" data-view="agenda" aria-label="Abrir agenda">◷</button>
+          <button class="avatar avatar-top" data-view="settings" id="user-avatar-top">GC</button>
         </div>
       </header>
       <div id="view-root" class="view-root" aria-live="polite"></div>

@@ -17,6 +17,8 @@ Windows; no modifica ni comparte los datos de Control Laboral.
 - Gastos por obra, enlaces a documentos, equipo e informes.
 - Copias JSON, exportación CSV, impresión/PDF y trabajo sin conexión.
 - Sincronización opcional con una tabla propia de Supabase.
+- Buscador global con acceso directo a cada ficha, vista de prioridades y modos oscuro y claro.
+- Identidad visual independiente con tonos verdes naturales y crema.
 
 ## PWA y GitHub Pages
 

@@ -6,7 +6,7 @@ def webAppRoot = rootProject.projectDir.parentFile
 tasks.register('syncWebAssets', Sync) {
     from(webAppRoot) {
         include 'index.html', 'app.js', 'styles.css', 'manifest.json', 'sw.js', 'supabase-config.js'
-        include 'icon-192.png', 'icon-512.png', 'icon-512-maskable.png'
+        include 'icon-192.png', 'icon-512.png', 'icon-512-maskable.png', 'brand-icon.svg'
     }
     from(new File(webAppRoot, 'vendor')) {
         into 'vendor'

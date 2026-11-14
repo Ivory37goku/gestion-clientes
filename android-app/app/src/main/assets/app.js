@@ -161,10 +161,77 @@ grant select, insert, update on public.gestion_clientes to authenticated;`;
     view = next;
     searchText = '';
     filterValue = 'all';
+    closeGlobalSearch(true);
     $$('.nav-item').forEach(b => b.classList.toggle('active', b.dataset.view === view));
     $('#crumb-title').textContent = TITLES[view] || 'Resumen';
     $('#sidebar').classList.remove('open');
     render();
+  }
+  function applyTheme() {
+    const theme = localStorage.getItem(KEY + '_theme') === 'light' ? 'light' : 'dark';
+    document.documentElement.dataset.theme = theme;
+    const themeColor = $('meta[name="theme-color"]');
+    if (themeColor) themeColor.content = theme === 'light' ? '#f5f1e6' : '#0a0f0d';
+    const toggle = $('#theme-toggle');
+    if (toggle) {
+      const nextTheme = theme === 'dark' ? 'claro' : 'oscuro';
+      toggle.textContent = theme === 'dark' ? '☼' : '☾';
+      toggle.setAttribute('aria-label', 'Activar modo ' + nextTheme);
+      toggle.title = 'Activar modo ' + nextTheme;
+    }
+  }
+  function toggleTheme() {
+    localStorage.setItem(KEY + '_theme', document.documentElement.dataset.theme === 'light' ? 'dark' : 'light');
+    applyTheme();
+  }
+  function normalizeSearchText(value) {
+    return String(value == null ? '' : value).normalize('NFD').replace(/[\u0300-\u036f]/g, '').toLocaleLowerCase('es');
+  }
+  function globalSearchMatches(query) {
+    const types = [
+      ['lead', 'Lead', data.leads], ['client', 'Cliente', data.clients], ['work', 'Obra', data.works],
+      ['task', 'Tarea', data.tasks], ['quote', 'Presupuesto', data.quotes], ['invoice', 'Factura', data.invoices],
+      ['document', 'Documento', data.documents]
+    ];
+    const q = normalizeSearchText(query);
+    return types.flatMap(([type, label, rows]) => rows.map(item => {
+      const title = item.name || item.company || item.title || item.number || item.kind || 'Sin título';
+      const relation = [clientName(item.clientId), workName(item.workId)].filter(Boolean).join(' · ');
+      const detail = type === 'lead' ? [item.company, item.phone, item.email, item.stage].filter(Boolean).join(' · ')
+        : type === 'client' ? [item.company, item.phone, item.email].filter(Boolean).join(' · ')
+        : type === 'work' ? [clientName(item.clientId), item.status, item.address].filter(Boolean).join(' · ')
+        : type === 'task' ? [relation, item.status, item.due ? dateFmt(item.due) : ''].filter(Boolean).join(' · ')
+        : type === 'quote' || type === 'invoice' ? [relation, item.status, item.number].filter(Boolean).join(' · ')
+        : [relation, item.kind].filter(Boolean).join(' · ');
+      const haystack = normalizeSearchText(JSON.stringify(item) + ' ' + relation);
+      if (!haystack.includes(q)) return null;
+      const titleMatch = normalizeSearchText(title);
+      const rank = titleMatch === q ? 0 : titleMatch.startsWith(q) ? 1 : titleMatch.includes(q) ? 2 : 3;
+      return { type, label, item, title, detail, rank };
+    })).filter(Boolean).sort((a, b) => a.rank - b.rank || a.title.localeCompare(b.title, 'es')).slice(0, 7);
+  }
+  function renderGlobalSearch(query) {
+    const input = $('#global-search-input');
+    const results = $('#global-search-results');
+    if (!input || !results) return;
+    const value = String(query || '').trim();
+    if (!value) {
+      results.innerHTML = '<div class="global-search-empty">Escribe un nombre, teléfono o número para buscar.</div>';
+      results.hidden = false;
+      input.setAttribute('aria-expanded', 'true');
+      return;
+    }
+    const matches = globalSearchMatches(value);
+    results.innerHTML = matches.length ? matches.map(result => '<button type="button" role="option" class="global-search-result" data-action="detail" data-type="' + result.type + '" data-id="' + esc(result.item.id) + '"><span class="global-result-mark" aria-hidden="true">' + esc(result.label.slice(0, 1)) + '</span><span class="global-result-copy"><strong>' + esc(result.title) + '</strong><small>' + esc(result.label + (result.detail ? ' · ' + result.detail : '')) + '</small></span><span class="global-result-arrow" aria-hidden="true">↵</span></button>').join('') : '<div class="global-search-empty">No hay resultados para «' + esc(value) + '».</div>';
+    results.hidden = false;
+    input.setAttribute('aria-expanded', 'true');
+  }
+  function closeGlobalSearch(clear) {
+    const input = $('#global-search-input');
+    const results = $('#global-search-results');
+    if (clear && input) input.value = '';
+    if (results) results.hidden = true;
+    if (input) input.setAttribute('aria-expanded', 'false');
   }
   function $$(s, root) { return Array.from((root || document).querySelectorAll(s)); }
   function clientName(id) { const x = data.clients.find(r => r.id === id); return x ? (x.company || x.name) : ''; }
@@ -197,7 +264,7 @@ grant select, insert, update on public.gestion_clientes to authenticated;`;
     document.title = (data.company.name || 'Gestión Clientes') + ' · ' + (TITLES[view] || 'Gestión');
     $('#company-name-side').textContent = data.company.name || 'Mi empresa';
     $('#user-name-side').textContent = data.company.owner || 'Tu perfil';
-    const initials = (data.company.owner || data.company.name || '37').trim().split(/\s+/).slice(0, 2).map(x => x[0]).join('').toUpperCase();
+    const initials = (data.company.owner || data.company.name || 'GC').trim().split(/\s+/).slice(0, 2).map(x => x[0]).join('').toUpperCase();
     $('#user-avatar').textContent = initials;
     $('#user-avatar-top').textContent = initials;
     $('#today-label').textContent = new Date().toLocaleDateString('es-ES', { weekday: 'short', day: 'numeric', month: 'short' });
@@ -248,7 +315,7 @@ grant select, insert, update on public.gestion_clientes to authenticated;`;
       return '<div class="pipe-step"><div class="pipe-label">' + esc(stage) + '</div><div class="pipe-value">' + subset.length + '</div><div class="pipe-bar"><i style="width:' + Math.round(subset.length / max * 100) + '%"></i></div></div>';
     }).join('');
     const setup = !data.company.name ? '<section class="setup-card"><h2>Deja lista tu empresa</h2><p>Completa los datos básicos y añade tu primer contacto para empezar.</p><div class="setup-steps"><span class="setup-step">1. Configura la empresa</span><span class="setup-step">2. Añade un lead o cliente</span><span class="setup-step">3. Crea una obra y sus tareas</span></div><div style="margin-top:11px">' + btn('Configurar empresa', 'settings-tab', 'btn-primary', ' data-tab="empresa"') + '</div></section>' : '';
-    const hero = '<section class="hero"><div><p class="eyebrow">' + esc(new Date().toLocaleDateString('es-ES', { weekday: 'long', day: 'numeric', month: 'long' })) + '</p><h1>' + (data.company.name ? 'Hola, <span style="color:var(--brand)">' + esc(data.company.owner || data.company.name) + '</span>' : 'Tu empresa, <span style="color:var(--brand)">en orden.</span>') + '</h1><p>Un vistazo claro a las oportunidades, las obras y los compromisos que mueven el negocio.</p></div><div class="hero-actions">' + newBtn('lead', 'Nuevo lead') + newBtn('client', 'Nuevo cliente') + newBtn('work', 'Nueva obra') + newBtn('task', 'Nueva tarea') + '</div></section>';
+    const hero = '<section class="hero"><div class="hero-main"><p class="eyebrow">' + esc(new Date().toLocaleDateString('es-ES', { weekday: 'long', day: 'numeric', month: 'long' })) + '</p><h1>' + (data.company.name ? 'Hola, <span>' + esc(data.company.owner || data.company.name) + '</span>' : 'Tu empresa, <span>en orden.</span>') + '</h1><p>Un vistazo claro a las oportunidades, las obras y los compromisos que mueven el negocio.</p></div>' + dashboardFocus() + '<div class="hero-actions">' + newBtn('lead', 'Nuevo lead') + newBtn('client', 'Nuevo cliente') + newBtn('work', 'Nueva obra') + newBtn('task', 'Nueva tarea') + '</div></section>';
     const kpis = '<div class="kpis">' +
       kpi('Leads abiertos', openLeads.length, money(weighted) + ' en oportunidades', '✳') +
       kpi('Obras en curso', activeWorks, data.works.length + ' obras en total', '▦') +
@@ -258,6 +325,45 @@ grant select, insert, update on public.gestion_clientes to authenticated;`;
     const leadContent = followups.length ? '<div class="list">' + followups.map(l => row(l.name || l.company, (l.company && l.name ? l.company + ' · ' : '') + 'seguimiento ' + dateFmt(l.nextDate), l.stage, '<span class="row-amount">' + esc(money(l.value)) + '</span>', '', l.id, 'lead')).join('') + '</div>' : empty('Sin seguimientos programados', 'Añade una fecha de seguimiento a un lead.', 'lead', 'Añadir lead');
     const worksContent = workRows.length ? '<div class="list">' + workRows.map(w => row(w.name, selected(data.clients, w.clientId) + (w.end ? ' · entrega ' + dateFmt(w.end) : ''), w.status, '<span class="row-amount">' + esc(money(w.budget)) + '</span>', '', w.id, 'work')).join('') + '</div>' : empty('Aún no hay obras', 'Las obras de tu empresa aparecerán aquí.', 'work', 'Crear obra');
     return setup + hero + kpis + card('Embudo comercial', pipeline, openLeads.length + ' oportunidades activas', '<button class="text-link" data-view="leads">Ver leads →</button>') + '<div class="grid-2" style="margin-top:14px">' + card('Tareas por delante', tasksContent, 'Fechas límite más próximas', '<button class="text-link" data-view="tasks">Todas →</button>') + card('Seguimientos comerciales', leadContent, 'No dejes enfriar una oportunidad', '<button class="text-link" data-view="leads">Todos →</button>') + '</div><div style="margin-top:14px">' + card('Obras activas', worksContent, 'Proyectos que están en marcha', '<button class="text-link" data-view="works">Ver obras →</button>') + '</div>';
+  }
+  function dashboardFocus() {
+    const openTasks = data.tasks.filter(task => task.status !== 'Hecha').sort((a, b) => (a.due || '9999').localeCompare(b.due || '9999'));
+    const openLeads = data.leads.filter(lead => !['Ganado', 'Perdido'].includes(lead.stage) && lead.nextDate).sort((a, b) => a.nextDate.localeCompare(b.nextDate));
+    const overdueTask = openTasks.find(task => task.due && task.due < today);
+    const dueLead = openLeads.find(lead => lead.nextDate <= today);
+    const nextTask = openTasks[0];
+    const nextLead = openLeads[0];
+    let heading = 'Nada urgente ahora mismo';
+    let copy = 'No tienes tareas abiertas ni seguimientos para hoy.';
+    let action = '<button type="button" class="btn btn-primary btn-sm" data-action="new" data-type="lead">Crear un lead</button>';
+    let eyebrow = 'TU SIGUIENTE MEJOR PASO';
+    if (overdueTask) {
+      heading = overdueTask.title || 'Tarea pendiente';
+      copy = 'Vencida ' + dateFmt(overdueTask.due) + (workName(overdueTask.workId) ? ' · ' + workName(overdueTask.workId) : '');
+      action = '<button type="button" class="btn btn-primary btn-sm" data-action="detail" data-type="task" data-id="' + esc(overdueTask.id) + '">Abrir tarea →</button>';
+      eyebrow = 'TAREA QUE PIDE ATENCIÓN';
+    } else if (dueLead) {
+      heading = dueLead.name || dueLead.company || 'Seguimiento comercial';
+      copy = 'Toca retomar esta oportunidad hoy' + (dueLead.company && dueLead.name ? ' · ' + dueLead.company : '');
+      action = '<button type="button" class="btn btn-primary btn-sm" data-action="detail" data-type="lead" data-id="' + esc(dueLead.id) + '">Abrir lead →</button>';
+      eyebrow = 'SEGUIMIENTO DE HOY';
+    } else if (nextLead && (!nextTask || nextLead.nextDate < (nextTask.due || '9999'))) {
+      heading = nextLead.name || nextLead.company || 'Seguimiento comercial';
+      copy = 'Próximo seguimiento · ' + dateFmt(nextLead.nextDate);
+      action = '<button type="button" class="btn btn-primary btn-sm" data-action="detail" data-type="lead" data-id="' + esc(nextLead.id) + '">Abrir lead →</button>';
+      eyebrow = 'PRÓXIMO PASO COMERCIAL';
+    } else if (nextTask) {
+      heading = nextTask.title || 'Tarea pendiente';
+      copy = (nextTask.due ? 'Vence ' + dateFmt(nextTask.due) : 'Sin fecha límite') + (workName(nextTask.workId) ? ' · ' + workName(nextTask.workId) : '');
+      action = '<button type="button" class="btn btn-primary btn-sm" data-action="detail" data-type="task" data-id="' + esc(nextTask.id) + '">Abrir tarea →</button>';
+      eyebrow = 'SIGUIENTE TAREA';
+    } else if (nextLead) {
+      heading = nextLead.name || nextLead.company || 'Seguimiento comercial';
+      copy = 'Próximo seguimiento · ' + dateFmt(nextLead.nextDate);
+      action = '<button type="button" class="btn btn-primary btn-sm" data-action="detail" data-type="lead" data-id="' + esc(nextLead.id) + '">Abrir lead →</button>';
+      eyebrow = 'PRÓXIMO PASO COMERCIAL';
+    }
+    return '<aside class="hero-focus" aria-label="Siguiente paso recomendado"><p class="focus-eyebrow">✦ ' + esc(eyebrow) + '</p><strong>' + esc(heading) + '</strong><p>' + esc(copy) + '</p>' + action + '</aside>';
   }
   function kpi(label, value, note, symbol) { return '<div class="kpi"><div class="kpi-label"><span>' + esc(label) + '</span><span class="kpi-symbol">' + symbol + '</span></div><div class="kpi-value">' + esc(value) + '</div><div class="kpi-note">' + esc(note) + '</div></div>'; }
   function defaultProbability(stage) { return ({ Nuevo: 10, Contactado: 25, Cualificado: 50, 'Propuesta enviada': 75 })[stage] || 0; }
@@ -1052,6 +1158,7 @@ grant select, insert, update on public.gestion_clientes to authenticated;`;
 
   function handleAction(target) {
     const action = target.dataset.action;
+    if (action === 'close-sidebar') { $('#sidebar').classList.remove('open'); return; }
     if (action === 'close-modal') { $('#modal-root').innerHTML = ''; return; }
     if (action === 'add-quote-line') { addQuoteLine(target.closest('form')); return; }
     if (action === 'remove-quote-line') {
@@ -1070,7 +1177,7 @@ grant select, insert, update on public.gestion_clientes to authenticated;`;
     if (action === 'quick-new') { openQuickNew(target); return; }
     if (action === 'edit') { openForm(target.dataset.type, target.dataset.id); return; }
     if (action === 'delete') { removeEntity(target.dataset.type, target.dataset.id); return; }
-    if (action === 'detail') { renderDetail(target.dataset.type, target.dataset.id); return; }
+    if (action === 'detail') { closeGlobalSearch(true); renderDetail(target.dataset.type, target.dataset.id); $('#sidebar').classList.remove('open'); return; }
     if (action === 'convert-lead') { openConvertLead(target.dataset.id); return; }
     if (action === 'convert-lead-finish') { convertLead(target.dataset.id, target.dataset.createWork === 'true'); return; }
     if (action === 'advance-lead') { advanceLead(target.dataset.id); return; }
@@ -1090,6 +1197,7 @@ grant select, insert, update on public.gestion_clientes to authenticated;`;
     if (action === 'export-all') { exportAll(); return; }
     if (action === 'export-report') { exportReport(); return; }
     if (action === 'cloud-setup') { download('gestion-clientes-supabase-setup.sql', CLOUD_SETUP_SQL, 'text/plain;charset=utf-8'); toast('Descargué el SQL. Ejecútalo en el Editor SQL de Supabase.', 'good'); return; }
+    if (action === 'toggle-theme') { toggleTheme(); return; }
     if (action === 'print') { printPage(); return; }
     if (action === 'cloud-sync') { syncCloud(true); return; }
     if (action === 'cloud-logout') { cloudLogout(); return; }
@@ -1099,6 +1207,7 @@ grant select, insert, update on public.gestion_clientes to authenticated;`;
 
   document.addEventListener('click', (event) => {
     if (event.target.closest('.document-link')) return;
+    if (!event.target.closest('.global-search')) closeGlobalSearch(false);
     const nav = event.target.closest('[data-view]');
     if (nav) { event.preventDefault(); setView(nav.dataset.view); return; }
     const target = event.target.closest('[data-action]');
@@ -1128,6 +1237,7 @@ grant select, insert, update on public.gestion_clientes to authenticated;`;
     }
   });
   document.addEventListener('input', (event) => {
+    if (event.target.id === 'global-search-input') renderGlobalSearch(event.target.value);
     if (event.target.id === 'search-input') {
       searchText = event.target.value;
       const caret = event.target.selectionStart;
@@ -1148,6 +1258,35 @@ grant select, insert, update on public.gestion_clientes to authenticated;`;
     }
     if (event.target.form && event.target.form.id === 'entity-form' && $('[data-quote-line-list]', event.target.form)) updateQuoteTotals(event.target.form);
   });
+  document.addEventListener('focusin', event => {
+    if (event.target.id === 'global-search-input' && event.target.value.trim()) renderGlobalSearch(event.target.value);
+  });
+  document.addEventListener('keydown', event => {
+    const search = $('#global-search-input');
+    if ((event.ctrlKey || event.metaKey) && event.key.toLowerCase() === 'k') {
+      event.preventDefault();
+      search.focus();
+      search.select();
+      renderGlobalSearch(search.value);
+      return;
+    }
+    if (event.key === 'Escape' && (event.target === search || (event.target.closest && event.target.closest('.global-search-results')))) { closeGlobalSearch(false); search.focus(); return; }
+    if (event.target === search && event.key === 'ArrowDown') {
+      const first = $('.global-search-result');
+      if (first) { event.preventDefault(); first.focus(); }
+      return;
+    }
+    if (event.target.classList && event.target.classList.contains('global-search-result')) {
+      const options = $$('.global-search-result');
+      const index = options.indexOf(event.target);
+      if (event.key === 'ArrowDown' && options[index + 1]) { event.preventDefault(); options[index + 1].focus(); return; }
+      if (event.key === 'ArrowUp') { event.preventDefault(); (options[index - 1] || search).focus(); return; }
+    }
+    if (event.target === search && event.key === 'Enter') {
+      const first = $('.global-search-result');
+      if (first) { event.preventDefault(); first.click(); }
+    }
+  });
   $('#menu-toggle').addEventListener('click', () => $('#sidebar').classList.toggle('open'));
   window.addEventListener('online', () => { if (cloudUser) syncCloud(false); });
   document.addEventListener('visibilitychange', () => { if (!document.hidden && cloudUser) syncCloud(false); });
@@ -1156,6 +1295,7 @@ grant select, insert, update on public.gestion_clientes to authenticated;`;
   if ('serviceWorker' in navigator && location.protocol !== 'file:') {
     navigator.serviceWorker.register('./sw.js', { scope: './' }).catch(err => console.warn('No se pudo activar el modo sin conexión.', err));
   }
+  applyTheme();
   render();
   initCloud();
 })();
