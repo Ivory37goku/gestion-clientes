@@ -47,6 +47,7 @@ notify pgrst, 'reload schema';`;
   const CANARY_ISLANDS = ['Gran Canaria', 'Tenerife', 'Lanzarote', 'Fuerteventura', 'La Palma', 'La Gomera', 'El Hierro', 'La Graciosa'];
   const GRAFCAN_CONFIG_URL = 'https://www.grafcan.es/files/wmsjson/callejero_v10.json';
   const PVGIS_CALC_URL = 'https://re.jrc.ec.europa.eu/api/v5_3/PVcalc';
+  const CLIENT_PORTAL_BASE_URL = 'https://ivory37goku.github.io/gestion-clientes/cliente.html';
   const ISLAND_CENTERS = {
     'Gran Canaria': [27.96, -15.57], Tenerife: [28.27, -16.64], Lanzarote: [29.03, -13.64], Fuerteventura: [28.36, -14.05],
     'La Palma': [28.66, -17.86], 'La Gomera': [28.12, -17.22], 'El Hierro': [27.74, -18.03], 'La Graciosa': [29.23, -13.50]
@@ -739,6 +740,82 @@ notify pgrst, 'reload schema';`;
     return Number.isInteger(value) && value >= 1 && value <= 12 ? new Date(2000, value - 1, 1).toLocaleDateString('es-ES', { month: 'short' }) : '—';
   }
 
+  function quotePortalPayload(quote) {
+    const client = data.clients.find(row => row.id === quote.clientId);
+    const work = data.works.find(row => row.id === quote.workId);
+    const study = work && work.solarStudy && work.solarStudy.result;
+    return {
+      version: 1,
+      company: { name: data.company.name || 'Nuestra empresa', phone: data.company.phone || '', email: data.company.email || '' },
+      clientName: client && (client.name || client.company) || '',
+      quote: { title: quote.title || 'Propuesta de trabajo', number: quote.number || '', date: quote.date || '', validUntil: quote.validUntil || '', taxName: quote.taxName || 'IGIC', taxRate: num(quote.taxRate), amount: num(quote.amount), total: total(quote), notes: quote.notes || '', items: (Array.isArray(quote.items) ? quote.items : []).map(line => ({ category: line.category || 'Otros', description: line.description || '', quantity: num(line.quantity), unit: line.unit || 'ud', unitPrice: num(line.unitPrice), amount: quoteLineTotal(line) })) },
+      solar: study ? { annualKwh: num(study.annualKwh), specificYield: num(study.specificYield), annualIrradiation: num(study.annualIrradiation), peakPower: num(study.config && study.config.peakPower), monthly: (study.monthly || []).map(row => ({ month: num(row.month), energyKwh: num(row.energyKwh) })) } : null
+    };
+  }
+
+  function quotePortalUrl(quote, language) {
+    const encoded = toBase64Utf8(JSON.stringify(quotePortalPayload(quote))).replace(/\+/g, '-').replace(/\//g, '_').replace(/=+$/g, '');
+    const url = new URL(CLIENT_PORTAL_BASE_URL);
+    url.searchParams.set('lang', ['en', 'de'].includes(language) ? language : 'es');
+    url.hash = 'p=' + encoded;
+    return url.href;
+  }
+
+  function quoteShareText(quote, link, language) {
+    const client = data.clients.find(row => row.id === quote.clientId);
+    const name = client && (client.name || client.company);
+    if (language === 'en') return 'Hello' + (name ? ' ' + name : '') + ', here is our proposal “' + (quote.title || 'Work proposal') + '”: ' + link;
+    if (language === 'de') return 'Guten Tag' + (name ? ' ' + name : '') + ', hier ist unser Angebot „' + (quote.title || 'Arbeitsangebot') + '“: ' + link;
+    return 'Hola' + (name ? ' ' + name : '') + ', te comparto el presupuesto «' + (quote.title || 'propuesta de trabajo') + '»: ' + link;
+  }
+
+  function updateQuoteShareModal(language) {
+    const root = $('#modal-root');
+    const quoteId = $('.quote-share-modal', root) && $('.quote-share-modal', root).dataset.quoteId;
+    const quote = quoteId && data.quotes.find(row => row.id === quoteId);
+    if (!quote) return;
+    const link = quotePortalUrl(quote, language);
+    const message = quoteShareText(quote, link, language);
+    const client = data.clients.find(row => row.id === quote.clientId);
+    const phone = client && client.phone ? phoneDigits(client.phone) : '';
+    const whatsapp = 'https://wa.me/' + (phone.length >= 11 ? phone : '') + '?text=' + encodeURIComponent(message);
+    const subject = (language === 'en' ? 'Proposal · ' : language === 'de' ? 'Angebot · ' : 'Presupuesto · ') + (quote.number || quote.title || 'Gestión Clientes');
+    const email = (client && client.email ? client.email : '') + '?subject=' + encodeURIComponent(subject) + '&body=' + encodeURIComponent(message);
+    const input = $('#portal-share-url', root);
+    const preview = $('#portal-share-preview', root);
+    const whatsappLink = $('#portal-share-whatsapp', root);
+    const emailLink = $('#portal-share-email', root);
+    if (input) input.value = link;
+    if (preview) preview.href = link;
+    if (whatsappLink) whatsappLink.href = whatsapp;
+    if (emailLink) emailLink.href = 'mailto:' + email;
+  }
+
+  function openQuoteShare(quoteId) {
+    const quote = data.quotes.find(row => row.id === quoteId);
+    if (!quote) return toast('No se encontró el presupuesto para compartir.', 'bad');
+    const client = data.clients.find(row => row.id === quote.clientId);
+    const link = quotePortalUrl(quote, 'es');
+    if (link.length > 14000) return toast('Esta propuesta es demasiado extensa para compartirla como enlace. Usa Imprimir / guardar PDF.', 'bad');
+    const modal = '<div class="modal-backdrop" data-action="backdrop"><section class="modal quote-share-modal" data-quote-id="' + esc(quoteId) + '" role="dialog" aria-modal="true" aria-labelledby="quote-share-title"><div class="modal-head"><h2 id="quote-share-title">Compartir propuesta con el cliente</h2><button type="button" class="close-btn" data-action="close-modal" aria-label="Cerrar">×</button></div><div class="modal-body"><div class="share-proposal-intro"><span class="share-proposal-icon">▤</span><div><strong>' + esc(quote.title || 'Propuesta de trabajo') + '</strong><p>' + esc((client && (client.name || client.company) || 'Cliente') + (quote.number ? ' · ' + quote.number : '') + ' · Total ' + money(total(quote))) + '</p></div></div><div class="field"><label for="portal-share-language">Idioma inicial</label><select id="portal-share-language"><option value="es" selected>Español</option><option value="en">English</option><option value="de">Deutsch</option></select></div><p class="share-link-note">El enlace abre una página de cliente sin iniciar sesión y muestra solo esta propuesta, los datos de contacto de tu empresa y el estudio solar si lo has añadido. Cualquiera que reciba el enlace podrá consultarla.</p><div class="field share-link-field"><label for="portal-share-url">Enlace de la propuesta</label><input id="portal-share-url" type="url" readonly value="' + esc(link) + '"></div><div class="share-proposal-actions"><button type="button" class="btn btn-primary" data-action="copy-quote-link">Copiar enlace</button><a class="btn" id="portal-share-preview" href="' + esc(link) + '" target="_blank" rel="noopener">Vista previa</a><a class="btn" id="portal-share-whatsapp" href="#" target="_blank" rel="noopener">Preparar WhatsApp</a><a class="btn" id="portal-share-email" href="#">Preparar correo</a></div><p class="modal-note">WhatsApp y correo se preparan para que revises el mensaje y lo envíes tú. No se envía nada automáticamente.</p></div></section></div>';
+    $('#modal-root').innerHTML = modal;
+    updateQuoteShareModal('es');
+  }
+
+  async function copyQuoteLink() {
+    const input = $('#portal-share-url');
+    if (!input) return;
+    input.focus();
+    input.select();
+    try {
+      if (navigator.clipboard && window.isSecureContext) await navigator.clipboard.writeText(input.value);
+      else if (!document.execCommand('copy')) throw new Error('No se pudo acceder al portapapeles.');
+      toast('Enlace de la propuesta copiado.', 'good');
+    } catch (_) {
+      toast('Selecciona el enlace y cópialo para compartirlo.', 'bad');
+    }
+  }
+
   function quickAction(label, type, context, description) {
     const item = context.item;
     const contextType = context.type;
@@ -1145,7 +1222,7 @@ notify pgrst, 'reload schema';`;
     if (type === 'document') { add('Tipo', item.kind); add('Relacionado con', workName(item.workId) || selected(data.clients, item.clientId)); add('Enlace', item.url); add('Notas', item.notes); }
     if (type === 'team') { add('Puesto', item.role); add('Correo', item.email); add('Teléfono', item.phone); add('Estado', item.active === false ? 'Inactivo' : 'Activo'); }
     if (type === 'payment') { add('Factura', selected(data.invoices, item.invoiceId)); add('Fecha', dateFmt(item.date)); add('Método', item.method); add('Importe', money(item.amount)); add('Notas', item.notes); }
-    const extraActions = type === 'lead' && !item.clientId && item.stage !== 'Perdido' ? '<button type="button" class="btn btn-primary btn-sm" data-action="convert-lead" data-id="' + esc(id) + '">Pasar a cliente</button>' : type === 'quote' ? '<button class="btn btn-sm" data-action="print">Imprimir / guardar PDF</button>' + (item.status !== 'Rechazada' ? '<button class="btn btn-primary btn-sm" data-action="quote-to-invoice" data-id="' + esc(id) + '">Crear factura</button>' : '') : type === 'invoice' && outstanding(item) > 0 ? '<button class="btn btn-primary btn-sm" data-action="payment" data-id="' + esc(id) + '">Registrar cobro</button>' : '';
+    const extraActions = type === 'lead' && !item.clientId && item.stage !== 'Perdido' ? '<button type="button" class="btn btn-primary btn-sm" data-action="convert-lead" data-id="' + esc(id) + '">Pasar a cliente</button>' : type === 'quote' ? '<button class="btn btn-sm" data-action="print">Imprimir / guardar PDF</button><button type="button" class="btn btn-sm" data-action="share-quote" data-id="' + esc(id) + '">Vista de cliente / compartir</button>' + (item.status !== 'Rechazada' ? '<button class="btn btn-primary btn-sm" data-action="quote-to-invoice" data-id="' + esc(id) + '">Crear factura</button>' : '') : type === 'invoice' && outstanding(item) > 0 ? '<button class="btn btn-primary btn-sm" data-action="payment" data-id="' + esc(id) + '">Registrar cobro</button>' : '';
     const breakdown = type === 'quote' ? quoteBreakdown(item) : type === 'invoice' && Array.isArray(item.items) && item.items.length ? quoteBreakdown(item) : '';
     const processPanel = type === 'lead' ? leadProcessPanel(item) : ['client', 'work'].includes(type) ? clientWorkProcessPanel(type, item, id) : '';
     const solarPanel = type === 'work' ? renderSolarStudyPanel(item, id) : '';
@@ -1838,6 +1915,8 @@ notify pgrst, 'reload schema';`;
     if (action === 'sync-lead-location') { syncLeadLocationNow(target.dataset.id); return; }
     if (action === 'solar-config') { openSolarConfig(target.dataset.id); return; }
     if (action === 'solar-download') { downloadSolarResult(target.dataset.id); return; }
+    if (action === 'share-quote') { openQuoteShare(target.dataset.id); return; }
+    if (action === 'copy-quote-link') { copyQuoteLink(); return; }
     if (action === 'quote-to-invoice') { quoteToInvoice(target.dataset.id); return; }
     if (action === 'payment') { openPayment(target.dataset.id); return; }
     if (action === 'toggle-task') {
@@ -1999,6 +2078,7 @@ notify pgrst, 'reload schema';`;
     if (event.target.form && event.target.form.id === 'entity-form' && $('[data-quote-line-list]', event.target.form)) updateQuoteTotals(event.target.form);
   });
   document.addEventListener('change', (event) => {
+    if (event.target.id === 'portal-share-language') { updateQuoteShareModal(event.target.value); return; }
     if (event.target.id === 'filter-select') { filterValue = event.target.value; render(); }
     if (event.target.id === 'island-filter') { islandFilter = event.target.value || 'all'; render(); }
     if (event.target.dataset.moveType) { moveRecord(event.target.dataset.moveType, event.target.dataset.id, event.target.value); return; }
