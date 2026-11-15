@@ -47,7 +47,34 @@ notify pgrst, 'reload schema';`;
   const CANARY_ISLANDS = ['Gran Canaria', 'Tenerife', 'Lanzarote', 'Fuerteventura', 'La Palma', 'La Gomera', 'El Hierro', 'La Graciosa'];
   const GRAFCAN_CONFIG_URL = 'https://www.grafcan.es/files/wmsjson/callejero_v10.json';
   const PVGIS_CALC_URL = 'https://re.jrc.ec.europa.eu/api/v5_3/PVcalc';
+  const CARTOCIUDAD_CANDIDATES_URL = 'https://www.cartociudad.es/geocoder/api/geocoder/candidates';
+  const CARTOCIUDAD_FIND_URL = 'https://www.cartociudad.es/geocoder/api/geocoder/find';
   const CLIENT_PORTAL_BASE_URL = 'https://ivory37goku.github.io/gestion-clientes/cliente.html';
+  const SOLAR_PRICE_SOURCES = {
+    canary: { label: 'Green Group Canarias · junio 2026', url: 'https://greengroupcanarias.com/precio-placas-solares-canarias-2026/' },
+    market: { label: 'GreenExperts · precios de mercado, mayo 2026', url: 'https://greenexperts.es/guia-precios/placas-solares/precio-instalacion-fotovoltaica-5-kw/' },
+    prices: { label: 'GreenExperts · desglose por kWp, mayo 2026', url: 'https://greenexperts.es/guia-precios/placas-solares/instalar-placas-solares/' },
+    cype: { label: 'CYPE · generador de precios, coste directo', url: 'https://generadordeprecios.info/obra_nueva/Instalaciones/Electricas/Solar_fotovoltaica/Modulo_solar_fotovoltaico.html' },
+    travel: { label: 'Tarifa publicada en Tenerife · consulta noviembre 2026', url: 'https://okservice.es/servicios/energias-renovables-tenerife' }
+  };
+  const SOLAR_QUOTE_CATALOG = [
+    { id: 'kit-3kwp', group: 'kits', category: 'Otros', description: 'Instalación fotovoltaica residencial 3 kWp sin batería · llave en mano', unit: 'servicio', unitPrice: 5000, defaultQuantity: 1, range: '4.500–5.500 €', source: 'canary', sourceNote: 'Incluye sistema y montaje según la referencia publicada. No lo combines con las mismas partidas desglosadas.' },
+    { id: 'kit-5kwp', group: 'kits', category: 'Otros', description: 'Instalación fotovoltaica residencial 5 kWp sin batería · llave en mano', unit: 'servicio', unitPrice: 7000, defaultQuantity: 1, range: '6.000–8.000 €', source: 'canary', sourceNote: 'Incluye sistema y montaje según la referencia publicada. No lo combines con las mismas partidas desglosadas.' },
+    { id: 'kit-5kwp-battery', group: 'kits', category: 'Otros', description: 'Instalación fotovoltaica 5 kWp con batería 5 kWh · llave en mano', unit: 'servicio', unitPrice: 10250, defaultQuantity: 1, range: '9.000–11.500 €', source: 'canary', sourceNote: 'Paquete completo con batería. No lo combines con las mismas partidas desglosadas.' },
+    { id: 'panel-tier1', group: 'materiales', category: 'Material', description: 'Panel fotovoltaico monocristalino TOPCon 425–460 Wp · gama Tier 1', unit: 'ud', unitPrice: 130, defaultQuantity: 12, range: '110–150 €/panel', source: 'market', sourceNote: 'Precio orientativo de suministro; verifica marca, potencia, stock y transporte.' },
+    { id: 'inverter-string', group: 'materiales', category: 'Material', description: 'Inversor fotovoltaico string monofásico 5 kW', unit: 'ud', unitPrice: 850, defaultQuantity: 1, range: '700–1.350 €/equipo', source: 'market', sourceNote: 'Precio de equipo, sin añadir montaje ni legalización.' },
+    { id: 'inverter-hybrid', group: 'materiales', category: 'Material', description: 'Inversor híbrido monofásico 5 kW preparado para batería', unit: 'ud', unitPrice: 1250, defaultQuantity: 1, range: '1.000–1.850 €/equipo', source: 'market', sourceNote: 'Precio de equipo; el rango depende de marca y gama.' },
+    { id: 'battery-5kwh', group: 'materiales', category: 'Material', description: 'Ampliación con batería LFP de 5 kWh instalada', unit: 'ud', unitPrice: 4250, defaultQuantity: 1, range: '3.500–5.000 €/sistema', source: 'market', sourceNote: 'Incremento orientativo para añadir almacenamiento; comprueba compatibilidad con el inversor.' },
+    { id: 'structure-tile', group: 'materiales', category: 'Material', description: 'Estructura certificada para cubierta inclinada de teja · juego por módulo', unit: 'ud', unitPrice: 50, defaultQuantity: 12, range: '450–750 € para 12 módulos', source: 'market', sourceNote: 'Precio de referencia para una instalación residencial típica de 12 paneles.' },
+    { id: 'structure-flat', group: 'materiales', category: 'Material', description: 'Estructura lastrada para cubierta plana · juego por módulo', unit: 'ud', unitPrice: 67, defaultQuantity: 12, range: '700–900 € para 12 módulos', source: 'market', sourceNote: 'Precio de referencia para una instalación residencial típica de 12 paneles.' },
+    { id: 'wiring-protection', group: 'materiales', category: 'Material', description: 'Cableado FV, conectores y protecciones DC/AC para sistema monofásico', unit: 'kWp', unitPrice: 80, defaultQuantity: 5, range: '300–500 € para 5 kWp (60–100 €/kWp)', source: 'market', sourceNote: 'Precio prorrateado por potencia; dimensiona secciones, distancias y protecciones según proyecto y REBT.' },
+    { id: 'mounting-labor', group: 'montaje', category: 'Mano de obra', description: 'Montaje, conexionado y puesta en marcha residencial · precio de referencia por kWp', unit: 'kWp', unitPrice: 300, defaultQuantity: 5, range: '250–450 €/kWp', source: 'prices', sourceNote: 'Partida de mano de obra; ajusta los kWp y evita sumarla junto con las horas del equipo.' },
+    { id: 'electrician-hour', group: 'montaje', category: 'Mano de obra', description: 'Oficial de 1.ª electricista · coste directo base de referencia', unit: 'horas', unitPrice: 25.52, defaultQuantity: 8, range: '25,52 €/hora de coste directo', source: 'cype', sourceNote: 'Coste directo base publicado por CYPE; añade tu estructura y margen comercial.' },
+    { id: 'helper-hour', group: 'montaje', category: 'Mano de obra', description: 'Ayudante electricista · coste directo base de referencia', unit: 'horas', unitPrice: 23.54, defaultQuantity: 8, range: '23,54 €/hora de coste directo', source: 'cype', sourceNote: 'Coste directo base publicado por CYPE; añade tu estructura y margen comercial.' },
+    { id: 'legalization', group: 'gestion', category: 'Otros', description: 'Memoria técnica, CIE y tramitación de autoconsumo residencial <10 kW', unit: 'servicio', unitPrice: 400, defaultQuantity: 1, range: '300–500 €/servicio orientativo', source: 'market', sourceNote: 'Comprueba el alcance, tasas y requisitos concretos de la instalación en Canarias.' },
+    { id: 'scaffold', group: 'montaje', category: 'Otros', description: 'Medios auxiliares por altura o acceso difícil (andamio/plataforma)', unit: 'servicio', unitPrice: 350, defaultQuantity: 1, range: '200–500 € adicionales', source: 'market', sourceNote: 'Añadir solo cuando la altura y el acceso lo requieran.' },
+    { id: 'travel-visit', group: 'gestion', category: 'Desplazamiento', description: 'Desplazamiento técnico dentro de la isla · visita/trayecto', unit: 'trayecto', unitPrice: 50, defaultQuantity: 1, range: '≈26,71–80,55 € con IGIC en la tarifa consultada', source: 'travel', sourceNote: 'Referencia de un servicio publicado en Tenerife; valor de partida aproximado sin IGIC. Ajusta por isla, distancia y viajes interinsulares.' }
+  ];
   const ISLAND_CENTERS = {
     'Gran Canaria': [27.96, -15.57], Tenerife: [28.27, -16.64], Lanzarote: [29.03, -13.64], Fuerteventura: [28.36, -14.05],
     'La Palma': [28.66, -17.86], 'La Gomera': [28.12, -17.22], 'El Hierro': [27.74, -18.03], 'La Graciosa': [29.23, -13.50]
@@ -276,6 +303,16 @@ notify pgrst, 'reload schema';`;
     return Number.isFinite(latitude) && Number.isFinite(longitude) && Math.abs(latitude) <= 90 && Math.abs(longitude) <= 180 ? [latitude, longitude] : null;
   }
   function siteIsland(record, relatedWork, client) { return (record && record.island) || (relatedWork && relatedWork.island) || (client && client.island) || ''; }
+  function solarWorkLocation(work, client) {
+    const lead = data.leads.find(row => row.id === work.sourceLeadId || (client && row.id === client.sourceLeadId)) || null;
+    const address = work.address || (client && client.address) || (lead && lead.address) || '';
+    const sameAddress = (left, right) => !!left && !!right && normalizeSearchText(left) === normalizeSearchText(right);
+    const workHasAddress = !!String(work.address || '').trim();
+    const clientCoordinatesMatch = !workHasAddress || sameAddress(work.address, client && client.address);
+    const leadCoordinatesMatch = !workHasAddress || sameAddress(work.address, lead && lead.address);
+    const coords = siteCoordinates(work) || (clientCoordinatesMatch && siteCoordinates(client)) || (leadCoordinatesMatch && siteCoordinates(lead)) || null;
+    return { address, island: work.island || (client && client.island) || (lead && lead.island) || '', coords, lead };
+  }
   function siteAddress(record, relatedWork, client) { return (record && record.address) || (relatedWork && relatedWork.address) || (client && client.address) || ''; }
   function mapDestination(record, address, island) {
     const coords = siteCoordinates(record);
@@ -872,23 +909,88 @@ notify pgrst, 'reload schema';`;
       return '<div class="solar-month"><div class="solar-bar-track"><i style="height:' + height + '%"></i></div><strong>' + esc(solarNumber(month.energyKwh)) + '</strong><small>' + esc(monthName(month.month)) + '</small></div>';
     }).join('');
     const resultBody = result ? '<div class="solar-stats"><div class="solar-stat solar-stat-primary"><span>Producción anual estimada</span><strong>' + esc(solarNumber(result.annualKwh)) + ' <small>kWh/año</small></strong></div><div class="solar-stat"><span>Rendimiento específico</span><strong>' + esc(solarNumber(result.specificYield)) + ' <small>kWh/kWp</small></strong></div><div class="solar-stat"><span>Radiación en los módulos</span><strong>' + esc(solarNumber(result.annualIrradiation)) + ' <small>kWh/m²/año</small></strong></div></div><div class="solar-chart-head"><strong>Producción media por mes</strong><span>Guardado ' + esc(savedAt) + '</span></div><div class="solar-chart" aria-label="Producción solar media mensual en kWh">' + chart + '</div><div class="solar-result-meta"><span>' + esc(solarNumber(result.config && result.config.peakPower)) + ' kWp instalados</span><span>Inclinación ' + esc(solarNumber(result.config && result.config.tilt)) + '°</span><span>Orientación ' + esc(solarNumber(result.config && result.config.azimuth)) + '°</span><span>Datos ' + esc(result.radiationDatabase || 'PVGIS') + '</span></div>' + (configPending ? '<p class="solar-pending-note">Has cambiado la configuración. El gráfico sigue mostrando el último resultado importado; vuelve a calcular e importa el nuevo archivo para actualizarlo.</p>' : '') : '<div class="solar-empty"><strong>Estudio solar aún sin calcular</strong><p>Configura potencia, orientación y ubicación para obtener la producción mensual estimada de esta obra.</p></div>';
-    const actions = '<div class="solar-actions"><button type="button" class="btn btn-primary btn-sm" data-action="solar-config" data-id="' + esc(workId) + '">' + (config ? 'Editar parámetros' : 'Preparar estudio solar') + '</button>' + (config.latitude != null && config.longitude != null ? '<button type="button" class="btn btn-sm" data-action="solar-download" data-id="' + esc(workId) + '">Descargar resultado PVGIS</button>' : '') + '<label class="btn btn-sm solar-import-label">Importar resultado JSON<input class="solar-import-input" type="file" accept=".json,application/json" data-solar-import data-work-id="' + esc(workId) + '"></label></div>';
-    const coordinates = result ? [result.latitude, result.longitude] : [config.latitude, config.longitude];
-    const location = coordinates.every(value => Number.isFinite(Number(value))) ? Number(coordinates[0]).toFixed(5) + ', ' + Number(coordinates[1]).toFixed(5) : (work.address || island || 'Ubicación por definir');
+    const actions = '<div class="solar-actions"><button type="button" class="btn btn-primary btn-sm" data-action="solar-config" data-id="' + esc(workId) + '">' + (config ? 'Editar parámetros' : 'Preparar estudio solar') + '</button>' + (siteCoordinates(config) ? '<button type="button" class="btn btn-sm" data-action="solar-download" data-id="' + esc(workId) + '">Descargar resultado PVGIS</button>' : '') + '<label class="btn btn-sm solar-import-label">Importar resultado JSON<input class="solar-import-input" type="file" accept=".json,application/json" data-solar-import data-work-id="' + esc(workId) + '"></label></div>';
+    const coordinates = siteCoordinates(result || config);
+    const location = coordinates ? coordinates[0].toFixed(5) + ', ' + coordinates[1].toFixed(5) : (work.address || (client && client.address) || island || 'Ubicación por definir');
     return '<section class="solar-study-panel"><div class="solar-panel-head"><div><p class="eyebrow">ENERGÍA · ANÁLISIS DE PROYECTO</p><h3>Estudio solar de la obra</h3><p>Producción estimada por ubicación con la base de radiación PVGIS 5.3 de la Comisión Europea.</p></div><span class="badge">PVGIS 5.3</span></div><div class="solar-location-line"><span>⌖</span><span>' + esc(location) + '</span><span>' + esc(island) + '</span></div>' + resultBody + actions + '<p class="solar-source-note">El estudio usa la potencia, orientación, inclinación y pérdidas indicadas. La producción es una estimación del sistema y no sustituye la comprobación técnica de sombras ni el perfil de consumo.</p></section>';
   }
 
+  function coordinatesFromGeocoder(record) {
+    const latitude = Number(record && record.lat);
+    const longitude = Number(record && record.lng);
+    if (Number.isFinite(latitude) && Number.isFinite(longitude) && latitude !== 0 && longitude !== 0 && Math.abs(latitude) <= 90 && Math.abs(longitude) <= 180) return [latitude, longitude];
+    const geometry = String(record && record.geom || '');
+    const point = geometry.match(/POINT\s*\(\s*(-?[\d.]+)\s+(-?[\d.]+)\s*\)/i);
+    if (point) return [Number(point[2]), Number(point[1])];
+    const pairs = Array.from(geometry.matchAll(/(-?[\d.]+)\s+(-?[\d.]+)/g)).map(match => [Number(match[1]), Number(match[2])]).filter(pair => pair.every(Number.isFinite));
+    if (!pairs.length) return null;
+    const longitudeAvg = pairs.reduce((sum, pair) => sum + pair[0], 0) / pairs.length;
+    const latitudeAvg = pairs.reduce((sum, pair) => sum + pair[1], 0) / pairs.length;
+    return latitudeAvg !== 0 && longitudeAvg !== 0 && Math.abs(latitudeAvg) <= 90 && Math.abs(longitudeAvg) <= 180 ? [latitudeAvg, longitudeAvg] : null;
+  }
+  async function geocodeCanaryAddress(address, island) {
+    const queries = Array.from(new Set([
+      [address, island, 'Canarias, España'].filter(Boolean).join(', '),
+      [address, island, 'Canarias'].filter(Boolean).join(', '),
+      [address, island].filter(Boolean).join(', '),
+      [address, 'Canarias'].filter(Boolean).join(', ')
+    ]));
+    let canaryCandidates = [];
+    for (const query of queries) {
+      if (!query) continue;
+      const url = CARTOCIUDAD_CANDIDATES_URL + '?' + new URLSearchParams({ q: query, limit: '10' }).toString();
+      const response = await fetch(url, { headers: { Accept: 'application/json' } });
+      if (!response.ok) continue;
+      const results = await response.json();
+      const candidates = (Array.isArray(results) ? results : [results]).filter(Boolean);
+      const canary = candidates.filter(row => {
+        const inCanaries = row.comunidadAutonomaCode === '05' || normalizeSearchText(row.comunidadAutonoma || '').includes('canarias');
+        const province = ['Tenerife', 'La Palma', 'La Gomera', 'El Hierro'].includes(island) ? 'Santa Cruz de Tenerife' : ['Gran Canaria', 'Lanzarote', 'Fuerteventura', 'La Graciosa'].includes(island) ? 'Las Palmas' : '';
+        if (!inCanaries || (province && row.province && row.province !== province)) return false;
+        const center = ISLAND_CENTERS[island];
+        const coords = coordinatesFromGeocoder(row);
+        if (!center || !coords) return true;
+        const maxKm = { 'Gran Canaria': 75, Tenerife: 80, Lanzarote: 45, Fuerteventura: 75, 'La Palma': 45, 'La Gomera': 35, 'El Hierro': 25, 'La Graciosa': 15 }[island] || 100;
+        const approximateKm = Math.hypot((coords[0] - center[0]) * 111, (coords[1] - center[1]) * 102);
+        return approximateKm <= maxKm;
+      });
+      if (canary.length) { canaryCandidates = canary; break; }
+    }
+    const requestedNumber = String(address).split(',')[0].match(/(?:^|\s)(\d+[a-z]?)\s*$/i);
+    const exactPortal = requestedNumber && canaryCandidates.find(row => row.type === 'portal' && String(row.portalNumber || '').toLowerCase() === requestedNumber[1].toLowerCase() && coordinatesFromGeocoder(row));
+    const pointCandidate = exactPortal || canaryCandidates.find(row => row.type === 'portal' && coordinatesFromGeocoder(row));
+    if (pointCandidate) return { coords: coordinatesFromGeocoder(pointCandidate), label: pointCandidate.address || address, quality: exactPortal ? 'portal exacto' : 'portal cercano' };
+    const streetCandidate = canaryCandidates.find(row => coordinatesFromGeocoder(row) || row.type === 'callejero');
+    if (streetCandidate) {
+      const findUrl = CARTOCIUDAD_FIND_URL + '?' + new URLSearchParams({ q: streetCandidate.address || address }).toString();
+      const findResponse = await fetch(findUrl, { headers: { Accept: 'application/json' } });
+      if (findResponse.ok && findResponse.status !== 204) {
+        const found = await findResponse.json().catch(() => null);
+        const coords = coordinatesFromGeocoder(found);
+        if (coords) return { coords, label: found.address || streetCandidate.address || address, quality: 'calle localizada' };
+      }
+      const fallback = coordinatesFromGeocoder(streetCandidate);
+      if (fallback) return { coords: fallback, label: streetCandidate.address || address, quality: 'ubicación aproximada' };
+    }
+    throw new Error('CartoCiudad no encontró un punto fiable para esta dirección. Comprueba la dirección o abre «Ajustar el punto manualmente» para marcar el tejado.');
+  }
   function openSolarConfig(workId) {
     const work = data.works.find(row => row.id === workId);
     if (!work) return toast('No se encontró la obra para preparar el estudio solar.', 'bad');
     const client = data.clients.find(row => row.id === work.clientId);
     const saved = work.solarStudy && work.solarStudy.config || {};
-    const coords = siteCoordinates(work) || siteCoordinates(client) || [];
-    const latitude = saved.latitude != null ? saved.latitude : (coords[0] == null ? '' : coords[0]);
-    const longitude = saved.longitude != null ? saved.longitude : (coords[1] == null ? '' : coords[1]);
+    const site = solarWorkLocation(work, client);
+    const savedCoords = siteCoordinates(saved);
+    const savedAddressMatches = !!saved.locationAddress && normalizeSearchText(saved.locationAddress) === normalizeSearchText(site.address);
+    const keepSaved = savedCoords && ((saved.locationSource === 'manual' && (!saved.locationAddress || savedAddressMatches)) || savedAddressMatches || (!site.address && !site.coords));
+    const coords = (keepSaved && savedCoords) || site.coords || (!site.address && savedCoords) || [];
+    const manualCoords = savedCoords && ((saved.locationSource === 'manual' && (!saved.locationAddress || savedAddressMatches)) || (!site.coords && !site.address));
+    const latitude = manualCoords ? savedCoords[0] : '';
+    const longitude = manualCoords ? savedCoords[1] : '';
     const mapRecord = coords.length ? { latitude: coords[0], longitude: coords[1] } : null;
-    const mapLink = '<a class="text-link" href="' + esc(grafcanViewerUrl(mapRecord, siteIsland(work, null, client))) + '" target="_blank" rel="noopener">Abrir GRAFCAN para consultar coordenadas ↗</a>';
-    const modal = '<div class="modal-backdrop" data-action="backdrop"><section class="modal solar-config-modal" role="dialog" aria-modal="true" aria-labelledby="solar-config-title"><div class="modal-head"><h2 id="solar-config-title">Configurar estudio PVGIS</h2><button type="button" class="close-btn" data-action="close-modal" aria-label="Cerrar">×</button></div><form id="solar-config-form" data-work-id="' + esc(workId) + '"><div class="modal-body"><p class="modal-note">Las coordenadas deben señalar el tejado o la instalación. ' + esc(work.name) + ' · ' + esc(work.address || (client && client.address) || siteIsland(work, null, client) || '') + '</p>' + mapLink + '<div class="fields solar-config-fields"><div class="field"><label for="solar-latitude">Latitud</label><input id="solar-latitude" name="latitude" type="number" step="0.000001" min="-90" max="90" value="' + esc(latitude) + '" required></div><div class="field"><label for="solar-longitude">Longitud</label><input id="solar-longitude" name="longitude" type="number" step="0.000001" min="-180" max="180" value="' + esc(longitude) + '" required></div><div class="field"><label for="solar-power">Potencia pico (kWp)</label><input id="solar-power" name="peakPower" type="number" min="0.1" max="1000" step="0.1" value="' + esc(saved.peakPower == null ? '5' : saved.peakPower) + '" required></div><div class="field"><label for="solar-loss">Pérdidas del sistema (%)</label><input id="solar-loss" name="loss" type="number" min="0" max="99" step="0.1" value="' + esc(saved.loss == null ? '14' : saved.loss) + '" required></div><div class="field"><label for="solar-tilt">Inclinación del panel (°)</label><input id="solar-tilt" name="tilt" type="number" min="0" max="90" step="1" value="' + esc(saved.tilt == null ? '15' : saved.tilt) + '" required></div><div class="field"><label for="solar-azimuth">Orientación (°)</label><input id="solar-azimuth" name="azimuth" type="number" min="-180" max="180" step="1" value="' + esc(saved.azimuth == null ? '0' : saved.azimuth) + '" required><span class="hint">0° sur · 90° oeste · −90° este</span></div><div class="field full"><label for="solar-mounting">Montaje</label><select id="solar-mounting" name="mounting"><option value="building"' + (saved.mounting !== 'free' ? ' selected' : '') + '>Sobre tejado / integrado en edificio</option><option value="free"' + (saved.mounting === 'free' ? ' selected' : '') + '>Estructura independiente</option></select></div></div><div class="solar-download-steps"><strong>Cómo guardar el resultado real</strong><ol><li>Guarda la configuración y abre PVGIS.</li><li>PVGIS descargará su resultado como archivo JSON.</li><li>Vuelve a esta obra y pulsa «Importar resultado JSON».</li></ol><p>El archivo queda guardado en la ficha y se sincroniza entre tus dispositivos.</p></div></div><div class="modal-foot"><span></span><div><button type="button" class="btn" data-action="close-modal">Cancelar</button><button type="submit" class="btn btn-primary">Guardar y calcular con PVGIS</button></div></div></form></section></div>';
+    const mapLink = '<a class="text-link" href="' + esc(grafcanViewerUrl(mapRecord, site.island)) + '" target="_blank" rel="noopener">Abrir GRAFCAN para revisar la ubicación ↗</a>';
+    const locationMessage = coords.length ? '<div class="solar-autolocation"><strong>Ubicación tomada de la ficha</strong><span>' + esc(site.address || site.island || 'Coordenadas guardadas') + '</span></div>' : '<div class="solar-autolocation"><strong>Usaré la dirección para localizar la obra</strong><span>' + esc(site.address || 'No hay una dirección guardada todavía') + (site.island ? ' · ' + esc(site.island) : '') + '</span><small>Se consultará CartoCiudad, servicio oficial del CNIG. Solo se envía la dirección, no el nombre ni los datos de contacto.</small></div>';
+    const modal = '<div class="modal-backdrop" data-action="backdrop"><section class="modal solar-config-modal" role="dialog" aria-modal="true" aria-labelledby="solar-config-title"><div class="modal-head"><h2 id="solar-config-title">Configurar estudio PVGIS</h2><button type="button" class="close-btn" data-action="close-modal" aria-label="Cerrar">×</button></div><form id="solar-config-form" data-work-id="' + esc(workId) + '"><div class="modal-body"><p class="modal-note">' + esc(work.name) + ' · ' + esc(site.address || site.island || 'Ubicación por definir') + '</p>' + locationMessage + mapLink + '<details class="solar-manual-location"><summary>Ajustar el punto del tejado manualmente (opcional)</summary><p class="hint">Normalmente basta con la dirección. Usa estas coordenadas solo si quieres desplazar el punto hasta el tejado.</p><div class="fields solar-config-fields"><div class="field"><label for="solar-latitude">Latitud</label><input id="solar-latitude" name="latitude" type="number" step="0.000001" min="-90" max="90" value="' + esc(latitude) + '"></div><div class="field"><label for="solar-longitude">Longitud</label><input id="solar-longitude" name="longitude" type="number" step="0.000001" min="-180" max="180" value="' + esc(longitude) + '"></div></div></details><div class="fields solar-config-fields"><div class="field"><label for="solar-power">Potencia pico (kWp)</label><input id="solar-power" name="peakPower" type="number" min="0.1" max="1000" step="0.1" value="' + esc(saved.peakPower == null ? '5' : saved.peakPower) + '" required></div><div class="field"><label for="solar-loss">Pérdidas del sistema (%)</label><input id="solar-loss" name="loss" type="number" min="0" max="99" step="0.1" value="' + esc(saved.loss == null ? '14' : saved.loss) + '" required></div><div class="field"><label for="solar-tilt">Inclinación del panel (°)</label><input id="solar-tilt" name="tilt" type="number" min="0" max="90" step="1" value="' + esc(saved.tilt == null ? '15' : saved.tilt) + '" required></div><div class="field"><label for="solar-azimuth">Orientación (°)</label><input id="solar-azimuth" name="azimuth" type="number" min="-180" max="180" step="1" value="' + esc(saved.azimuth == null ? '0' : saved.azimuth) + '" required><span class="hint">0° sur · 90° oeste · −90° este</span></div><div class="field full"><label for="solar-mounting">Montaje</label><select id="solar-mounting" name="mounting"><option value="building"' + (saved.mounting !== 'free' ? ' selected' : '') + '>Sobre tejado / integrado en edificio</option><option value="free"' + (saved.mounting === 'free' ? ' selected' : '') + '>Estructura independiente</option></select></div></div><div class="solar-download-steps"><strong>Cómo guardar el resultado real</strong><ol><li>Guarda la configuración y abre PVGIS.</li><li>PVGIS descargará su resultado como archivo JSON.</li><li>Vuelve a esta obra y pulsa «Importar resultado JSON».</li></ol><p>El archivo queda guardado en la ficha y se sincroniza entre tus dispositivos.</p></div></div><div class="modal-foot"><span></span><div><button type="button" class="btn" data-action="close-modal">Cancelar</button><button type="submit" class="btn btn-primary">Guardar y calcular con PVGIS</button></div></div></form></section></div>';
     $('#modal-root').innerHTML = modal;
   }
 
@@ -908,15 +1010,44 @@ notify pgrst, 'reload schema';`;
     link.remove();
   }
 
-  function saveSolarConfiguration(form) {
+  async function saveSolarConfiguration(form) {
     const workId = form.dataset.workId;
     const work = data.works.find(row => row.id === workId);
     if (!work) return toast('No se encontró la obra donde guardar el estudio.', 'bad');
     const values = Object.fromEntries(new FormData(form).entries());
-    const config = { latitude: num(values.latitude), longitude: num(values.longitude), peakPower: num(values.peakPower), loss: num(values.loss), tilt: num(values.tilt), azimuth: num(values.azimuth), mounting: values.mounting === 'free' ? 'free' : 'building', updatedAt: nowIso() };
+    const client = data.clients.find(row => row.id === work.clientId);
+    const site = solarWorkLocation(work, client);
+    const latitudeInput = String(values.latitude || '').trim();
+    const longitudeInput = String(values.longitude || '').trim();
+    if (!!latitudeInput !== !!longitudeInput) return toast('Para fijar el punto manualmente, introduce latitud y longitud.', 'bad');
+    let coords = latitudeInput && longitudeInput ? [num(latitudeInput), num(longitudeInput)] : site.coords;
+    let locationSource = latitudeInput && longitudeInput ? 'manual' : 'linked';
+    let locationLabel = site.address;
+    if (!coords && site.address) {
+      const submit = $('[type="submit"]', form);
+      if (submit) { submit.disabled = true; submit.textContent = 'Buscando dirección…'; }
+      try {
+        const located = await geocodeCanaryAddress(site.address, site.island);
+        coords = located.coords;
+        locationLabel = located.label || site.address;
+        locationSource = 'address';
+      } catch (error) {
+        if (submit) { submit.disabled = false; submit.textContent = 'Guardar y calcular con PVGIS'; }
+        return toast(error && error.message || 'No se pudo localizar la dirección. Revisa la dirección o indica el punto manualmente.', 'bad');
+      }
+    }
+    if (!coords) return toast('Esta obra no tiene dirección. Añade la dirección del cliente o de la obra, o fija el punto manualmente.', 'bad');
+    const config = { latitude: num(coords[0]), longitude: num(coords[1]), locationAddress: locationLabel || site.address || '', locationSource, peakPower: num(values.peakPower), loss: num(values.loss), tilt: num(values.tilt), azimuth: num(values.azimuth), mounting: values.mounting === 'free' ? 'free' : 'building', updatedAt: nowIso() };
     if (!Number.isFinite(config.latitude) || Math.abs(config.latitude) > 90 || !Number.isFinite(config.longitude) || Math.abs(config.longitude) > 180 || config.peakPower <= 0 || config.loss < 0 || config.loss >= 100 || config.tilt < 0 || config.tilt > 90 || config.azimuth < -180 || config.azimuth > 180) return toast('Revisa las coordenadas y los parámetros del sistema.', 'bad');
     const study = Object.assign({}, work.solarStudy || {}, { config });
-    if (!commitChange(() => { work.solarStudy = study; work.updatedAt = nowIso(); })) return;
+    if (!commitChange(() => {
+      work.solarStudy = study;
+      if (work.latitude == null || work.latitude === '') work.latitude = config.latitude;
+      if (work.longitude == null || work.longitude === '') work.longitude = config.longitude;
+      if (!work.address && site.address) work.address = site.address;
+      if (!work.island && site.island) work.island = site.island;
+      work.updatedAt = nowIso();
+    })) return;
     $('#modal-root').innerHTML = '';
     renderDetail('work', workId);
     openPVGISDownload(config);
@@ -1296,6 +1427,10 @@ notify pgrst, 'reload schema';`;
   function quoteLineMarkup(item) {
     const category = item.category || 'Mano de obra';
     const unit = item.unit == null ? quoteDefaultUnit(category) : String(item.unit);
+    const priceReference = item.priceReference || '';
+    const priceReferenceUrl = item.priceReferenceUrl || '';
+    const priceRange = item.priceRange || '';
+    const priceReferenceNote = item.priceReferenceNote || '';
     const autoUnit = unit === quoteDefaultUnit(category) ? 'true' : 'false';
     const categories = ['Mano de obra', 'Desplazamiento', 'Material', 'Otros'];
     const lineId = 'quote-line-' + uid();
@@ -1306,15 +1441,63 @@ notify pgrst, 'reload schema';`;
       '<div class="field"><label for="' + lineId + '-unit">Unidad</label><input id="' + lineId + '-unit" data-quote-field="unit" type="text" data-auto-unit="' + autoUnit + '" value="' + esc(unit) + '" placeholder="horas, km, ud"></div>' +
       '<div class="field"><label for="' + lineId + '-price">Precio por unidad (€)</label><input id="' + lineId + '-price" data-quote-field="unitPrice" type="number" min="0" step="0.01" value="' + esc(item.unitPrice == null ? '' : item.unitPrice) + '" placeholder="0,00"></div>' +
       '<div class="quote-line-total-wrap"><span>Importe de la partida</span><strong data-quote-line-total>0,00 €</strong></div>' +
-      '</div><div class="quote-line-actions"><span class="muted small">Cantidad × precio por unidad</span><button type="button" class="tiny-btn danger" data-action="remove-quote-line" aria-label="Quitar esta partida">Quitar partida</button></div></article>';
+      '</div><div class="quote-line-actions"><span class="muted small">Cantidad × precio por unidad</span>' + (priceReference ? '<small class="quote-line-reference">Referencia ' + esc(priceRange ? priceRange + ' · ' : '') + (priceReferenceUrl ? '<a href="' + esc(safeHref(priceReferenceUrl)) + '" target="_blank" rel="noopener">' + esc(priceReference) + ' ↗</a>' : esc(priceReference)) + (priceReferenceNote ? ' · ' + esc(priceReferenceNote) : '') + '</small>' : '') + '<button type="button" class="tiny-btn danger" data-action="remove-quote-line" aria-label="Quitar esta partida">Quitar partida</button></div><input type="hidden" data-quote-field="priceReference" value="' + esc(priceReference) + '"><input type="hidden" data-quote-field="priceReferenceUrl" value="' + esc(priceReferenceUrl) + '"><input type="hidden" data-quote-field="priceRange" value="' + esc(priceRange) + '"><input type="hidden" data-quote-field="priceReferenceNote" value="' + esc(priceReferenceNote) + '"></article>';
   }
   function quoteItemsForForm(item) {
     if (Array.isArray(item.items) && item.items.length) return clone(item.items);
     if (num(item.amount) > 0) return [{ category: 'Otros', description: item.title || 'Importe anterior sin desglose', quantity: 1, unit: 'servicio', unitPrice: num(item.amount) }];
     return [{ category: 'Mano de obra', description: '', quantity: '', unit: 'horas', unitPrice: '' }];
   }
-  function quoteEditorMarkup(items) {
-    return '<section class="quote-editor"><div class="card-head"><div><h3>Desglose del presupuesto</h3><p>Indica horas y tarifa, coste del desplazamiento y materiales por unidad.</p></div><button type="button" class="btn btn-sm" data-action="add-quote-line">＋ Añadir partida</button></div><div class="quote-line-list" data-quote-line-list>' + (items || []).map(quoteLineMarkup).join('') + '</div><div class="quote-summary"><div><span>Base imponible</span><strong data-quote-base>0,00 €</strong></div><div><span>IGIC (<b data-quote-tax-rate>7</b> %)</span><strong data-quote-tax>0,00 €</strong></div><div class="quote-summary-total"><span>Total</span><strong data-quote-total>0,00 €</strong></div></div><p class="modal-note">Los importes se calculan automáticamente. En los presupuestos antiguos, el importe actual se conserva como una partida editable.</p></section>';
+  function quoteEditorMarkup(items, includeCatalog) {
+    return '<section class="quote-editor"><div class="card-head"><div><h3>Desglose del presupuesto</h3><p>Horas, desplazamiento, materiales, montaje e IGIC, con partidas listas para usar.</p></div><button type="button" class="btn btn-sm" data-action="add-quote-line">＋ Añadir partida manual</button></div>' + (includeCatalog ? quoteCatalogMarkup() : '') + '<div class="quote-line-list" data-quote-line-list>' + (items || []).map(quoteLineMarkup).join('') + '</div><div class="quote-summary"><div><span>Base imponible</span><strong data-quote-base>0,00 €</strong></div><div><span>IGIC (<b data-quote-tax-rate>7</b> %)</span><strong data-quote-tax>0,00 €</strong></div><div class="quote-summary-total"><span>Total</span><strong data-quote-total>0,00 €</strong></div></div><p class="modal-note">' + (includeCatalog ? 'Precios orientativos consultados en noviembre de 2026; cada precio se puede editar. Los packs llave en mano ya incluyen partidas del sistema: no los sumes junto al desglose de los mismos trabajos. En los presupuestos antiguos, el importe actual se conserva como una partida editable.' : 'Importes calculados automáticamente a partir del desglose.') + '</p></section>';
+  }
+  function quoteCatalogMarkup() {
+    return '<section class="quote-catalog" aria-label="Catálogo de partidas fotovoltaicas"><div class="quote-catalog-head"><div><p class="eyebrow">CATÁLOGO FOTOVOLTAICO</p><strong>Selecciona una partida y añádela al presupuesto</strong><p>Referencias para Canarias y precios de mercado. Ajusta marca, cubierta, potencia y tarifa de tu empresa.</p></div><span class="quote-catalog-count">' + SOLAR_QUOTE_CATALOG.length + ' partidas</span></div><div class="quote-catalog-tools"><div class="field"><label for="quote-catalog-search">Buscar en el catálogo</label><input id="quote-catalog-search" type="search" data-catalog-search placeholder="Ej.: panel, inversor, batería, horas…" autocomplete="off"></div><div class="field"><label for="quote-catalog-group">Tipo de partida</label><select id="quote-catalog-group" data-catalog-group><option value="frecuentes">Más utilizadas</option><option value="kits">Instalaciones completas</option><option value="materiales">Equipos y materiales</option><option value="montaje">Montaje y mano de obra</option><option value="gestion">Desplazamientos y trámites</option><option value="todas">Ver todo el catálogo</option></select></div></div><p class="quote-catalog-warning" data-catalog-warning hidden>Este pack llave en mano incluye el suministro y los trabajos habituales. No lo combines con esas mismas partidas individuales.</p><div class="quote-catalog-results" data-catalog-results></div><div class="quote-catalog-footer">Fuentes: <a href="' + esc(SOLAR_PRICE_SOURCES.canary.url) + '" target="_blank" rel="noopener">tarifas residenciales publicadas en Canarias</a>, <a href="' + esc(SOLAR_PRICE_SOURCES.market.url) + '" target="_blank" rel="noopener">desglose de mercado FV 2026</a> y <a href="' + esc(SOLAR_PRICE_SOURCES.cype.url) + '" target="_blank" rel="noopener">CYPE</a>. Precios indicativos; la aplicación suma el IGIC configurado, así que comprueba si el precio de origen incluye impuestos. El catálogo funciona también sin conexión.</div></section>';
+  }
+  function quoteCatalogCardMarkup(item) {
+    const source = SOLAR_PRICE_SOURCES[item.source] || {};
+    return '<article class="quote-catalog-card"><div class="quote-catalog-card-copy"><span class="quote-catalog-type">' + esc(item.category) + '</span><strong>' + esc(item.description) + '</strong><small>' + esc(item.range || '') + '</small></div><div class="quote-catalog-card-bottom"><div><strong>' + esc(money(item.unitPrice)) + '</strong><span>por ' + esc(item.unit) + '</span></div><button type="button" class="btn btn-sm btn-primary" data-action="add-catalog-quote-line" data-catalog-id="' + esc(item.id) + '">Añadir</button></div><small class="quote-catalog-source">' + (source.url ? '<a href="' + esc(source.url) + '" target="_blank" rel="noopener">' + esc(source.label) + ' ↗</a>' : esc(source.label || 'Referencia de precios')) + (item.sourceNote ? ' · ' + esc(item.sourceNote) : '') + '</small></article>';
+  }
+  function renderQuoteCatalog(form) {
+    const results = $('[data-catalog-results]', form);
+    if (!results) return;
+    const group = ($('[data-catalog-group]', form) || {}).value || 'frecuentes';
+    const search = normalizeSearchText(($('[data-catalog-search]', form) || {}).value || '');
+    const items = SOLAR_QUOTE_CATALOG.filter(item => {
+      const inGroup = group === 'todas' || item.group === group || (group === 'frecuentes' && ['panel-tier1', 'inverter-hybrid', 'battery-5kwh', 'structure-tile', 'wiring-protection', 'mounting-labor', 'legalization', 'travel-visit'].includes(item.id));
+      const haystack = normalizeSearchText([item.description, item.category, item.unit, item.range, item.sourceNote].join(' '));
+      return inGroup && (!search || haystack.includes(search));
+    });
+    results.innerHTML = items.length ? items.map(quoteCatalogCardMarkup).join('') : '<p class="quote-catalog-empty">No hay partidas con esa búsqueda. Prueba otra palabra o añade una partida manual.</p>';
+    const warning = $('[data-catalog-warning]', form);
+    if (warning) warning.hidden = group !== 'kits' && !items.some(item => item.group === 'kits');
+  }
+  function suggestedCatalogQuantity(item, form) {
+    if (item.id === 'panel-tier1' || item.id === 'structure-tile' || item.id === 'structure-flat') {
+      const workId = ($('[name="workId"]', form) || {}).value;
+      const work = data.works.find(row => row.id === workId);
+      const config = work && work.solarStudy && work.solarStudy.config;
+      if (config && num(config.peakPower) > 0) return Math.max(1, Math.ceil(num(config.peakPower) * 1000 / 425));
+    }
+    if (item.id === 'mounting-labor' || item.id === 'wiring-protection') {
+      const workId = ($('[name="workId"]', form) || {}).value;
+      const work = data.works.find(row => row.id === workId);
+      const config = work && work.solarStudy && work.solarStudy.config;
+      if (config && num(config.peakPower) > 0) return num(config.peakPower);
+    }
+    return item.defaultQuantity || 1;
+  }
+  function addCatalogQuoteLine(form, catalogId) {
+    if (!form) return;
+    const item = SOLAR_QUOTE_CATALOG.find(entry => entry.id === catalogId);
+    const list = $('[data-quote-line-list]', form);
+    if (!item || !list) return;
+    const line = { category: item.category, description: item.description, quantity: suggestedCatalogQuantity(item, form), unit: item.unit, unitPrice: item.unitPrice, priceReference: (SOLAR_PRICE_SOURCES[item.source] || {}).label || '', priceReferenceUrl: (SOLAR_PRICE_SOURCES[item.source] || {}).url || '', priceRange: item.range || '', priceReferenceNote: item.sourceNote || '' };
+    const blank = Array.from(list.children).find(row => !($('[data-quote-field="description"]', row) || {}).value && !($('[data-quote-field="quantity"]', row) || {}).value && !($('[data-quote-field="unitPrice"]', row) || {}).value);
+    if (blank) blank.outerHTML = quoteLineMarkup(line);
+    else list.insertAdjacentHTML('beforeend', quoteLineMarkup(line));
+    updateQuoteTotals(form);
+    toast('Partida añadida al desglose.', 'good');
   }
   function quoteItemsFromForm(form) {
     const items = [];
@@ -1329,7 +1512,7 @@ notify pgrst, 'reload schema';`;
       const quantity = num(quantityRaw);
       const unitPrice = num(priceRaw);
       if (!description || !quantityRaw || !unit || !priceRaw || quantity <= 0 || unitPrice < 0) { incomplete = true; return; }
-      items.push({ category, description, quantity, unit, unitPrice });
+      items.push({ category, description, quantity, unit, unitPrice, priceReference: ($('[data-quote-field="priceReference"]', row) || {}).value || '', priceReferenceUrl: ($('[data-quote-field="priceReferenceUrl"]', row) || {}).value || '', priceRange: ($('[data-quote-field="priceRange"]', row) || {}).value || '', priceReferenceNote: ($('[data-quote-field="priceReferenceNote"]', row) || {}).value || '' });
     });
     if (incomplete) return { error: 'Completa la descripción, cantidad, unidad y precio de cada partida que hayas empezado.' };
     if (!items.length) return { error: 'Añade al menos una partida detallada al presupuesto.' };
@@ -1390,7 +1573,7 @@ notify pgrst, 'reload schema';`;
     if (type === 'quote') item.items = quoteItemsForForm(item);
     const hasDetailedLines = type === 'quote' || (type === 'invoice' && Array.isArray(item.items) && item.items.length > 0);
     const fieldContent = hasDetailedLines
-      ? '<div class="fields">' + FIELDS[type].filter(s => !['amount', 'notes'].includes(s[0])).map(s => fieldMarkup(s, item[s[0]])).join('') + '</div>' + quoteEditorMarkup(item.items) + '<div class="fields">' + fieldMarkup(FIELDS[type].find(s => s[0] === 'notes'), item.notes) + '</div>'
+      ? '<div class="fields">' + FIELDS[type].filter(s => !['amount', 'notes'].includes(s[0])).map(s => fieldMarkup(s, item[s[0]])).join('') + '</div>' + quoteEditorMarkup(item.items, type === 'quote') + '<div class="fields">' + fieldMarkup(FIELDS[type].find(s => s[0] === 'notes'), item.notes) + '</div>'
       : '<div class="fields">' + FIELDS[type].map(s => fieldMarkup(s, item[s[0]])).join('') + '</div>';
     const title = id ? 'Editar ' + TYPE_LABEL[type] : TYPE_TITLE[type];
     const form = '<div class="modal-backdrop" data-action="backdrop"><section class="modal" role="dialog" aria-modal="true" aria-labelledby="form-title"><div class="modal-head"><h2 id="form-title">' + esc(title) + '</h2><button class="close-btn" data-action="close-modal" aria-label="Cerrar">×</button></div><form id="entity-form" data-type="' + type + '" data-id="' + esc(id || '') + '"><div class="modal-body"><p class="modal-note">Los campos marcados son necesarios para guardar el registro.</p>' + fieldContent + '</div><div class="modal-foot"><div>' + (id ? '<button type="button" class="btn btn-danger btn-sm" data-action="delete" data-type="' + type + '" data-id="' + esc(id) + '">Eliminar</button>' : '') + '</div><div><button type="button" class="btn" data-action="close-modal">Cancelar</button><button type="submit" class="btn btn-primary">Guardar</button></div></div></form></section></div>';
@@ -1400,6 +1583,7 @@ notify pgrst, 'reload schema';`;
       if (input && preset[name] != null && preset[name] !== '') input.dataset.inherited = 'true';
     });
     if (hasDetailedLines) updateQuoteTotals($('#entity-form'));
+    if (type === 'quote') renderQuoteCatalog($('#entity-form'));
     const first = $('#entity-form input, #entity-form select, #entity-form textarea');
     if (first) setTimeout(() => first.focus(), 40);
   }
@@ -1888,6 +2072,7 @@ notify pgrst, 'reload schema';`;
     if (action === 'close-sidebar') { $('#sidebar').classList.remove('open'); return; }
     if (action === 'close-modal') { $('#modal-root').innerHTML = ''; return; }
     if (action === 'add-quote-line') { addQuoteLine(target.closest('form')); return; }
+    if (action === 'add-catalog-quote-line') { addCatalogQuoteLine(target.closest('form'), target.dataset.catalogId); return; }
     if (action === 'remove-quote-line') {
       const form = target.closest('form');
       const row = target.closest('.quote-line-card');
@@ -2047,7 +2232,7 @@ notify pgrst, 'reload schema';`;
   document.addEventListener('submit', (event) => {
     if (event.target.id === 'entity-form') { event.preventDefault(); saveEntity(event.target); }
     else if (event.target.id === 'activity-form') { event.preventDefault(); saveActivity(event.target); }
-    else if (event.target.id === 'solar-config-form') { event.preventDefault(); saveSolarConfiguration(event.target); }
+    else if (event.target.id === 'solar-config-form') { event.preventDefault(); saveSolarConfiguration(event.target).catch(error => toast(error && error.message || 'No se pudo guardar la configuración PVGIS.', 'bad')); }
     else if (event.target.id === 'company-form') {
       event.preventDefault();
       const companyValues = {};
@@ -2065,6 +2250,7 @@ notify pgrst, 'reload schema';`;
     }
   });
   document.addEventListener('input', (event) => {
+    if (event.target.matches('[data-catalog-search]')) renderQuoteCatalog(event.target.form);
     if (event.target.id === 'global-search-input') renderGlobalSearch(event.target.value);
     if (event.target.id === 'search-input') {
       searchText = event.target.value;
@@ -2078,6 +2264,7 @@ notify pgrst, 'reload schema';`;
     if (event.target.form && event.target.form.id === 'entity-form' && $('[data-quote-line-list]', event.target.form)) updateQuoteTotals(event.target.form);
   });
   document.addEventListener('change', (event) => {
+    if (event.target.matches('[data-catalog-group]')) { renderQuoteCatalog(event.target.form); return; }
     if (event.target.id === 'portal-share-language') { updateQuoteShareModal(event.target.value); return; }
     if (event.target.id === 'filter-select') { filterValue = event.target.value; render(); }
     if (event.target.id === 'island-filter') { islandFilter = event.target.value || 'all'; render(); }

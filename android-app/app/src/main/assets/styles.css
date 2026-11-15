@@ -69,6 +69,43 @@ html{scroll-behavior:smooth}body{margin:0;min-height:100vh;background:radial-gra
   #modal-root .quote-total-row th{background:#eee}
 }
 
+.quote-catalog{margin:14px 0;padding:14px;border:1px solid rgba(166,217,74,.19);border-radius:14px;background:linear-gradient(140deg,rgba(166,217,74,.055),rgba(255,255,255,.018))}
+.quote-catalog-head{display:flex;align-items:flex-start;justify-content:space-between;gap:12px;margin-bottom:12px}
+.quote-catalog-head .eyebrow{margin:0 0 4px;color:var(--brand);font-size:9px;font-weight:850;letter-spacing:.12em}
+.quote-catalog-head strong{display:block;color:var(--text);font-size:12px}
+.quote-catalog-head p:not(.eyebrow){margin:4px 0 0;color:var(--muted);font-size:10px;line-height:1.5}
+.quote-catalog-count{flex:none;padding:5px 8px;border:1px solid var(--line);border-radius:999px;color:var(--muted);font-size:9px;font-weight:750}
+.quote-catalog-tools{display:grid;grid-template-columns:minmax(0,1.3fr) minmax(180px,.7fr);gap:9px;margin-bottom:10px}
+.quote-catalog-tools .field{margin:0}
+.quote-catalog-tools .field label{font-size:9px}
+.quote-catalog-results{display:grid;grid-template-columns:repeat(2,minmax(0,1fr));gap:8px}
+.quote-catalog-card{display:flex;flex-direction:column;min-width:0;padding:10px;border:1px solid var(--line-soft);border-radius:11px;background:rgba(7,14,26,.28)}
+.quote-catalog-card-copy{display:grid;gap:4px;min-height:63px}
+.quote-catalog-type{color:var(--brand);font-size:8px;font-weight:850;letter-spacing:.08em;text-transform:uppercase}
+.quote-catalog-card-copy>strong{color:var(--text);font-size:10px;line-height:1.4}
+.quote-catalog-card-copy>small{color:var(--muted);font-size:9px}
+.quote-catalog-card-bottom{display:flex;align-items:center;justify-content:space-between;gap:8px;margin-top:9px;padding-top:8px;border-top:1px solid var(--line-soft)}
+.quote-catalog-card-bottom>div{display:flex;align-items:baseline;flex-wrap:wrap;gap:4px}
+.quote-catalog-card-bottom>div strong{color:var(--text);font-size:12px;font-variant-numeric:tabular-nums}
+.quote-catalog-card-bottom>div span{color:var(--muted);font-size:9px}
+.quote-catalog-source{display:block;margin-top:7px;color:var(--muted);font-size:8px;line-height:1.4}
+.quote-catalog-source a,.quote-catalog-footer a,.quote-line-reference a{color:var(--brand);text-decoration:none}
+.quote-catalog-source a:hover,.quote-catalog-footer a:hover,.quote-line-reference a:hover{text-decoration:underline}
+.quote-catalog-warning{margin:0 0 10px;padding:8px 10px;border:1px solid rgba(245,158,11,.25);border-radius:9px;background:rgba(245,158,11,.07);color:var(--text);font-size:9px;line-height:1.45}
+.quote-catalog-empty{grid-column:1/-1;margin:0;padding:16px;border:1px dashed var(--line);border-radius:10px;color:var(--muted);font-size:10px;text-align:center}
+.quote-catalog-footer{margin-top:10px;color:var(--muted);font-size:8px;line-height:1.5}
+.quote-line-reference{flex:1;min-width:160px;color:var(--muted);font-size:8px;line-height:1.35}
+.solar-autolocation{display:grid;gap:3px;margin:10px 0;padding:11px 12px;border:1px solid rgba(166,217,74,.2);border-radius:10px;background:rgba(166,217,74,.055)}
+.solar-autolocation strong{color:var(--text);font-size:10px}
+.solar-autolocation span,.solar-autolocation small{color:var(--muted);font-size:9px;line-height:1.45}
+.solar-manual-location{margin:10px 0;padding:10px 12px;border:1px solid var(--line-soft);border-radius:10px;background:rgba(255,255,255,.018)}
+.solar-manual-location summary{color:var(--text);font-size:10px;font-weight:700;cursor:pointer}
+.solar-manual-location .hint{margin:7px 0;color:var(--muted);font-size:9px}
+.solar-manual-location .solar-config-fields{margin-top:8px}
+html[data-theme="light"] .quote-catalog-card{background:rgba(28,38,22,.025)}
+html[data-theme="light"] .solar-manual-location{background:rgba(28,38,22,.025)}
+@media(max-width:740px){.quote-catalog{padding:11px}.quote-catalog-head{flex-direction:column}.quote-catalog-tools{grid-template-columns:1fr}.quote-catalog-results{grid-template-columns:1fr}.quote-catalog-card-copy{min-height:0}.quote-line-reference{flex-basis:100%;min-width:0;order:3}}
+
 .context-panel{margin-bottom:15px;padding:16px;border:1px solid rgba(166,217,74,.2);border-radius:15px;background:linear-gradient(135deg,rgba(166,217,74,.055),rgba(255,255,255,.018) 54%,rgba(255,255,255,.012))}
 .context-panel-head{display:flex;justify-content:space-between;align-items:flex-start;gap:12px;margin-bottom:13px}
 .context-panel-head .eyebrow,.relationships-heading .eyebrow{margin:0 0 4px;color:var(--brand);font-size:9px;font-weight:800;letter-spacing:.12em}
