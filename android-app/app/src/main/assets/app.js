@@ -748,7 +748,8 @@ notify pgrst, 'reload schema';`;
     const mapActions = '<div class="location-actions">' + (address || coords ? '<a class="btn btn-primary btn-sm" href="' + esc(directionsUrl(mapRecord, address, island)) + '" target="_blank" rel="noopener">' + directionsLabel + '</a>' : '<span class="muted small">Añade la dirección o las coordenadas para abrir una ruta.</span>') + '<a class="btn btn-sm" href="' + esc(grafcanViewerUrl(mapRecord, island)) + '" target="_blank" rel="noopener">Abrir GRAFCAN ↗</a>' + (client && client.phone ? '<a class="btn btn-sm" href="tel:' + esc(client.phone.replace(/[^\d+]/g, '')) + '">Llamar</a>' : '') + (client && client.phone && whatsappUrl(client.phone, message) ? '<a class="btn btn-sm" href="' + esc(whatsappUrl(client.phone, message)) + '" target="_blank" rel="noopener">' + notifyLabel + ' por WhatsApp</a>' : '') + (client && client.email ? '<a class="btn btn-sm" href="mailto:' + esc(client.email) + '?subject=' + encodeURIComponent(isVisit ? 'Visita · ' + (item.title || destination) : isLead ? 'Coordinar visita · ' + (item.company || item.name || destination) : 'Llegada · ' + (item.name || destination)) + '&body=' + encodeURIComponent(message) + '">Correo</a>' : '') + '</div>';
     const locationText = [address, island, coords ? coords[0].toFixed(6) + ', ' + coords[1].toFixed(6) : ''].filter(Boolean).join(' · ');
     const note = coords ? 'Punto guardado en la ficha.' : island ? 'Mapa centrado en ' + island + '. Guarda las coordenadas para fijar el punto exacto.' : 'Completa la dirección o la isla para localizar el sitio.';
-    return '<section class="location-panel"><div class="location-panel-head"><div><p class="eyebrow">UBICACIÓN Y CONTACTO</p><h3>' + esc(destination) + '</h3><p>' + esc(locationText || note) + '</p></div>' + (client ? '<span class="badge">' + esc(client.company || client.name || 'Cliente') + '</span>' : '') + '</div>' + mapActions + '<iframe class="grafcan-frame" src="' + esc(grafcanViewerUrl(mapRecord, island)) + '" title="Mapa de GRAFCAN · ' + esc(destination) + '" loading="lazy" referrerpolicy="strict-origin-when-cross-origin" allowfullscreen></iframe><p class="location-note">' + esc(note) + ' Los enlaces de ruta y aviso se abren en la aplicación correspondiente; el WhatsApp queda preparado para que lo revises y lo envíes.</p></section>';
+    const leadSyncNote = isLead && item.clientId ? ' Al guardar cambios en este lead, la ubicación se copia al cliente y a la obra asociados si todavía no tienen una ubicación propia.' : '';
+    return '<section class="location-panel"><div class="location-panel-head"><div><p class="eyebrow">UBICACIÓN Y CONTACTO</p><h3>' + esc(destination) + '</h3><p>' + esc(locationText || note) + '</p></div>' + (client ? '<span class="badge">' + esc(client.company || client.name || 'Cliente') + '</span>' : '') + '</div>' + mapActions + '<iframe class="grafcan-frame" src="' + esc(grafcanViewerUrl(mapRecord, island)) + '" title="Mapa de GRAFCAN · ' + esc(destination) + '" loading="lazy" referrerpolicy="strict-origin-when-cross-origin" allowfullscreen></iframe><p class="location-note">' + esc(note) + ' Los enlaces de ruta y aviso se abren en la aplicación correspondiente; el WhatsApp queda preparado para que lo revises y lo envíes.' + esc(leadSyncNote) + '</p></section>';
   }
 
   function workQuickActions(work) {
@@ -1071,7 +1072,8 @@ notify pgrst, 'reload schema';`;
     related.forEach(record => {
       let changed = false;
       ['island', 'address', 'latitude', 'longitude'].forEach(field => {
-        if (!sameLocationValue(field, record[field], previous[field])) return;
+        const recordIsBlank = record[field] == null || record[field] === '';
+        if (!recordIsBlank && !sameLocationValue(field, record[field], previous[field])) return;
         const nextValue = lead[field] == null ? '' : lead[field];
         if (sameLocationValue(field, record[field], nextValue)) return;
         record[field] = nextValue;
