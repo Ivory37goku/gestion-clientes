@@ -49,6 +49,7 @@ notify pgrst, 'reload schema';`;
   const PVGIS_CALC_URL = 'https://re.jrc.ec.europa.eu/api/v5_3/PVcalc';
   const CARTOCIUDAD_CANDIDATES_URL = 'https://www.cartociudad.es/geocoder/api/geocoder/candidates';
   const CARTOCIUDAD_FIND_URL = 'https://www.cartociudad.es/geocoder/api/geocoder/find';
+  const CANARIAS_GEOCODER_URL = 'https://datos.canarias.es/api/estadisticas/georref/api/v1/search';
   const CLIENT_PORTAL_BASE_URL = 'https://ivory37goku.github.io/gestion-clientes/cliente.html';
   const SOLAR_PRICE_SOURCES = {
     canary: { label: 'Green Group Canarias · junio 2026', url: 'https://greengroupcanarias.com/precio-placas-solares-canarias-2026/' },
@@ -312,6 +313,26 @@ notify pgrst, 'reload schema';`;
     const leadCoordinatesMatch = !workHasAddress || sameAddress(work.address, lead && lead.address);
     const coords = siteCoordinates(work) || (clientCoordinatesMatch && siteCoordinates(client)) || (leadCoordinatesMatch && siteCoordinates(lead)) || null;
     return { address, island: work.island || (client && client.island) || (lead && lead.island) || '', coords, lead };
+  }
+  function inferCanaryIsland(address, preferredIsland) {
+    const text = normalizeSearchText(address);
+    const preferred = normalizeSearchText(preferredIsland);
+    const clues = {
+      'Gran Canaria': ['gran canaria', 'las palmas de gran canaria', 'maspalomas', 'vecindario', 'telde', 'arucas', 'galdar', 'agaete', 'ingenio', 'aguimes', 'mogan', 'san bartolome de tirajana', 'santa lucia de tirajana'],
+      Tenerife: ['tenerife', 'santa cruz de tenerife', 'la laguna', 'san cristobal de la laguna', 'adeje', 'arona', 'los cristianos', 'granadilla de abona', 'puerto de la cruz', 'icod de los vinos', 'la orotava', 'candelaria'],
+      Lanzarote: ['lanzarote', 'arrecife', 'puerto del carmen', 'playa blanca', 'teguise', 'san bartolome lanzarote', 'haria', 'tinajo', 'yaiza', 'tias'],
+      Fuerteventura: ['fuerteventura', 'puerto del rosario', 'corralejo', 'la oliva', 'morro jable', 'costa calma', 'pajara', 'antigua', 'tuineje'],
+      'La Palma': ['la palma', 'santa cruz de la palma', 'los llanos de aridane', 'los llanos', 'el paso', 'breña alta', 'breña baja', 'san andres y sauces'],
+      'La Gomera': ['la gomera', 'san sebastian de la gomera', 'valle gran rey', 'vallehermoso', 'hermigua', 'alajero'],
+      'El Hierro': ['el hierro', 'valverde', 'frontera', 'el pinar'],
+      'La Graciosa': ['la graciosa', 'caleta de sebo']
+    };
+    for (const island of CANARY_ISLANDS) {
+      if (text.includes(normalizeSearchText(island))) return island;
+      if ((clues[island] || []).some(clue => text.includes(normalizeSearchText(clue)))) return island;
+    }
+    for (const island of CANARY_ISLANDS) if (preferred.includes(normalizeSearchText(island))) return island;
+    return '';
   }
   function siteAddress(record, relatedWork, client) { return (record && record.address) || (relatedWork && relatedWork.address) || (client && client.address) || ''; }
   function mapDestination(record, address, island) {
@@ -916,10 +937,25 @@ notify pgrst, 'reload schema';`;
   }
 
   function coordinatesFromGeocoder(record) {
-    const latitude = Number(record && record.lat);
-    const longitude = Number(record && record.lng);
+    const latitude = Number(record && (record.lat != null ? record.lat : record.latitude != null ? record.latitude : record.LATITUD_WGS84_4326));
+    const longitude = Number(record && (record.lng != null ? record.lng : record.lon != null ? record.lon : record.longitude != null ? record.longitude : record.LONGITUD_WGS84_4326));
     if (Number.isFinite(latitude) && Number.isFinite(longitude) && latitude !== 0 && longitude !== 0 && Math.abs(latitude) <= 90 && Math.abs(longitude) <= 180) return [latitude, longitude];
-    const geometry = String(record && record.geom || '');
+    const rawGeometry = record && (record.geom || record.geometry);
+    if (rawGeometry && typeof rawGeometry === 'object') {
+      const pairs = [];
+      const collect = value => {
+        if (!Array.isArray(value)) return;
+        if (value.length >= 2 && Number.isFinite(Number(value[0])) && Number.isFinite(Number(value[1]))) pairs.push([Number(value[0]), Number(value[1])]);
+        else value.forEach(collect);
+      };
+      collect(rawGeometry.coordinates || rawGeometry);
+      if (pairs.length) {
+        const lon = pairs.reduce((sum, pair) => sum + pair[0], 0) / pairs.length;
+        const lat = pairs.reduce((sum, pair) => sum + pair[1], 0) / pairs.length;
+        if (lat !== 0 && lon !== 0 && Math.abs(lat) <= 90 && Math.abs(lon) <= 180) return [lat, lon];
+      }
+    }
+    const geometry = String(rawGeometry || '');
     const point = geometry.match(/POINT\s*\(\s*(-?[\d.]+)\s+(-?[\d.]+)\s*\)/i);
     if (point) return [Number(point[2]), Number(point[1])];
     const pairs = Array.from(geometry.matchAll(/(-?[\d.]+)\s+(-?[\d.]+)/g)).map(match => [Number(match[1]), Number(match[2])]).filter(pair => pair.every(Number.isFinite));
@@ -928,51 +964,145 @@ notify pgrst, 'reload schema';`;
     const latitudeAvg = pairs.reduce((sum, pair) => sum + pair[1], 0) / pairs.length;
     return latitudeAvg !== 0 && longitudeAvg !== 0 && Math.abs(latitudeAvg) <= 90 && Math.abs(longitudeAvg) <= 180 ? [latitudeAvg, longitudeAvg] : null;
   }
-  async function geocodeCanaryAddress(address, island) {
+  async function fetchGeocoderJson(url) {
+    const controller = typeof AbortController === 'function' ? new AbortController() : null;
+    const timer = controller ? setTimeout(() => controller.abort(), 4500) : null;
+    try {
+      const response = await fetch(url, { headers: { Accept: 'application/json' }, signal: controller && controller.signal });
+      if (!response.ok || response.status === 204) return null;
+      return await response.json().catch(() => null);
+    } catch (_) {
+      return null;
+    } finally {
+      if (timer) clearTimeout(timer);
+    }
+  }
+  async function geocodeWithCanaryStats(address, island) {
+    const rawAddress = String(address || '').trim();
+    if (!rawAddress && !island) return null;
+    const center = ISLAND_CENTERS[island];
     const queries = Array.from(new Set([
-      [address, island, 'Canarias, España'].filter(Boolean).join(', '),
-      [address, island, 'Canarias'].filter(Boolean).join(', '),
-      [address, island].filter(Boolean).join(', '),
-      [address, 'Canarias'].filter(Boolean).join(', ')
-    ]));
-    let canaryCandidates = [];
-    for (const query of queries) {
-      if (!query) continue;
-      const url = CARTOCIUDAD_CANDIDATES_URL + '?' + new URLSearchParams({ q: query, limit: '10' }).toString();
-      const response = await fetch(url, { headers: { Accept: 'application/json' } });
-      if (!response.ok) continue;
-      const results = await response.json();
-      const candidates = (Array.isArray(results) ? results : [results]).filter(Boolean);
-      const canary = candidates.filter(row => {
-        const inCanaries = row.comunidadAutonomaCode === '05' || normalizeSearchText(row.comunidadAutonoma || '').includes('canarias');
-        const province = ['Tenerife', 'La Palma', 'La Gomera', 'El Hierro'].includes(island) ? 'Santa Cruz de Tenerife' : ['Gran Canaria', 'Lanzarote', 'Fuerteventura', 'La Graciosa'].includes(island) ? 'Las Palmas' : '';
-        if (!inCanaries || (province && row.province && row.province !== province)) return false;
-        const center = ISLAND_CENTERS[island];
-        const coords = coordinatesFromGeocoder(row);
-        if (!center || !coords) return true;
-        const maxKm = { 'Gran Canaria': 75, Tenerife: 80, Lanzarote: 45, Fuerteventura: 75, 'La Palma': 45, 'La Gomera': 35, 'El Hierro': 25, 'La Graciosa': 15 }[island] || 100;
-        const approximateKm = Math.hypot((coords[0] - center[0]) * 111, (coords[1] - center[1]) * 102);
-        return approximateKm <= maxKm;
+      [rawAddress, island, 'Canarias, España'].filter(Boolean).join(', '),
+      [rawAddress, 'Canarias, España'].filter(Boolean).join(', '),
+      [rawAddress, island].filter(Boolean).join(', ')
+    ].filter(Boolean)));
+    const responses = await Promise.all(queries.map(async textValue => {
+      const params = new URLSearchParams({
+        text: textValue, size: '8', 'boundary.country': 'ESP',
+        'boundary.rect.min_lon': '-18.7', 'boundary.rect.min_lat': '26.5',
+        'boundary.rect.max_lon': '-12.0', 'boundary.rect.max_lat': '30.2'
       });
-      if (canary.length) { canaryCandidates = canary; break; }
-    }
-    const requestedNumber = String(address).split(',')[0].match(/(?:^|\s)(\d+[a-z]?)\s*$/i);
-    const exactPortal = requestedNumber && canaryCandidates.find(row => row.type === 'portal' && String(row.portalNumber || '').toLowerCase() === requestedNumber[1].toLowerCase() && coordinatesFromGeocoder(row));
-    const pointCandidate = exactPortal || canaryCandidates.find(row => row.type === 'portal' && coordinatesFromGeocoder(row));
-    if (pointCandidate) return { coords: coordinatesFromGeocoder(pointCandidate), label: pointCandidate.address || address, quality: exactPortal ? 'portal exacto' : 'portal cercano' };
-    const streetCandidate = canaryCandidates.find(row => coordinatesFromGeocoder(row) || row.type === 'callejero');
-    if (streetCandidate) {
-      const findUrl = CARTOCIUDAD_FIND_URL + '?' + new URLSearchParams({ q: streetCandidate.address || address }).toString();
-      const findResponse = await fetch(findUrl, { headers: { Accept: 'application/json' } });
-      if (findResponse.ok && findResponse.status !== 204) {
-        const found = await findResponse.json().catch(() => null);
-        const coords = coordinatesFromGeocoder(found);
-        if (coords) return { coords, label: found.address || streetCandidate.address || address, quality: 'calle localizada' };
+      if (center) {
+        params.set('focus.point.lon', String(center[1]));
+        params.set('focus.point.lat', String(center[0]));
       }
-      const fallback = coordinatesFromGeocoder(streetCandidate);
-      if (fallback) return { coords: fallback, label: streetCandidate.address || address, quality: 'ubicación aproximada' };
+      return await fetchGeocoderJson(CANARIAS_GEOCODER_URL + '?' + params.toString());
+    }));
+    const features = responses.flatMap(response => response && Array.isArray(response.features) ? response.features : []);
+    const province = ['Tenerife', 'La Palma', 'La Gomera', 'El Hierro'].includes(island) ? 'santa cruz de tenerife' : ['Gran Canaria', 'Lanzarote', 'Fuerteventura', 'La Graciosa'].includes(island) ? 'las palmas' : '';
+    const matches = features.map(feature => {
+      const props = feature && feature.properties || {};
+      const geometry = feature && feature.geometry || {};
+      const longitude = Number(geometry.coordinates && geometry.coordinates[0]);
+      const latitude = Number(geometry.coordinates && geometry.coordinates[1]);
+      const macroregion = normalizeSearchText(props.macroregion || '');
+      const region = normalizeSearchText(props.region || props.county || '');
+      const inCanaryBounds = Number.isFinite(latitude) && Number.isFinite(longitude) && latitude >= 26.5 && latitude <= 30.2 && longitude >= -18.7 && longitude <= -12.0;
+      const hasCanaryRegion = macroregion.includes('canarias') || inCanaryBounds;
+      if (!inCanaryBounds || !hasCanaryRegion || (province && region && !region.includes(province) && !normalizeSearchText(props.label || '').includes(normalizeSearchText(island)))) return null;
+      if (center && Math.hypot((latitude - center[0]) * 111, (longitude - center[1]) * 102) > ({ 'Gran Canaria': 75, Tenerife: 80, Lanzarote: 45, Fuerteventura: 75, 'La Palma': 45, 'La Gomera': 35, 'El Hierro': 25, 'La Graciosa': 15 }[island] || 100)) return null;
+      const confidence = Number(props.confidence) || 0;
+      const accuracy = normalizeSearchText(props.accuracy || '');
+      const matchType = normalizeSearchText(props.match_type || '');
+      const score = confidence + (accuracy === 'point' ? 1 : 0) + (matchType === 'exact' ? 2 : 0);
+      return { coords: [latitude, longitude], label: props.label || props.name || rawAddress || island, confidence, accuracy, matchType, score };
+    }).filter(Boolean).sort((a, b) => b.score - a.score);
+    const best = matches[0];
+    if (!best || best.confidence < 0.25) return null;
+    const precise = best.accuracy === 'point' && (best.matchType === 'exact' || best.confidence >= 0.8);
+    return {
+      coords: best.coords,
+      label: best.label,
+      quality: precise ? 'punto de dirección localizado (precisión orientativa)' : 'localidad aproximada',
+      source: precise ? 'address' : 'address-approx-locality'
+    };
+  }
+  async function geocodeCanaryAddress(address, island) {
+    const rawAddress = String(address || '').replace(/\s+/g, ' ').trim();
+    const inferredIsland = inferCanaryIsland(rawAddress, island);
+    const cleanAddress = rawAddress
+      .replace(/\b(?:portal|piso|puerta|pta\.?|escalera|bloque|blq\.?|n[uú]mero|n[uú]m\.?|n\.?)[\s:#-]*[\wºª./-]+/gi, ' ')
+      .replace(/\b\d+[ºª]\s*[a-z]?\b/gi, ' ')
+      .replace(/\s+/g, ' ').replace(/[,;\s]+$/g, '').trim();
+    const queries = Array.from(new Set([
+      [rawAddress, inferredIsland, 'Canarias, España'].filter(Boolean).join(', '),
+      [rawAddress, 'Canarias, España'].filter(Boolean).join(', '),
+      [rawAddress, inferredIsland].filter(Boolean).join(', '),
+      [cleanAddress, inferredIsland, 'Canarias, España'].filter(Boolean).join(', '),
+      rawAddress
+    ].filter(Boolean)));
+    const candidateLists = await Promise.all(queries.map(async query => {
+      const url = CARTOCIUDAD_CANDIDATES_URL + '?' + new URLSearchParams({ q: query, limit: '15' }).toString();
+      const results = await fetchGeocoderJson(url);
+      return { query, candidates: (Array.isArray(results) ? results : results ? [results] : []).filter(Boolean) };
+    }));
+    const province = ['Tenerife', 'La Palma', 'La Gomera', 'El Hierro'].includes(inferredIsland) ? 'Santa Cruz de Tenerife' : ['Gran Canaria', 'Lanzarote', 'Fuerteventura', 'La Graciosa'].includes(inferredIsland) ? 'Las Palmas' : '';
+    const allCandidates = candidateLists.flatMap(group => group.candidates.map(row => ({ row, query: group.query })));
+    const canaryCandidates = allCandidates.filter(({ row, query }) => {
+      const region = normalizeSearchText(row.comunidadAutonoma || row.autonomousCommunity || row.ccaa || '');
+      const knownCanary = row.comunidadAutonomaCode === '05' || region.includes('canarias');
+      if (region && !region.includes('canarias')) return false;
+      if (province && row.province && normalizeSearchText(row.province) !== normalizeSearchText(province)) return false;
+      const coords = coordinatesFromGeocoder(row);
+      if (coords) {
+        const inCanaryBounds = coords[0] >= 26.5 && coords[0] <= 30.2 && coords[1] >= -18.7 && coords[1] <= -12.0;
+        if (!inCanaryBounds) return false;
+        const center = ISLAND_CENTERS[inferredIsland];
+        if (center) {
+          const maxKm = { 'Gran Canaria': 75, Tenerife: 80, Lanzarote: 45, Fuerteventura: 75, 'La Palma': 45, 'La Gomera': 35, 'El Hierro': 25, 'La Graciosa': 15 }[inferredIsland] || 100;
+          if (Math.hypot((coords[0] - center[0]) * 111, (coords[1] - center[1]) * 102) > maxKm) return false;
+        }
+        return true;
+      }
+      return knownCanary || (!region && !row.province && /canarias/i.test(query));
+    });
+    const requestedNumber = rawAddress.split(',')[0].match(/(?:^|\s)(\d+[a-z]?)\s*$/i);
+    const exactPortal = requestedNumber && canaryCandidates.find(({ row }) => row.type === 'portal' && String(row.portalNumber || '').toLowerCase() === requestedNumber[1].toLowerCase() && coordinatesFromGeocoder(row));
+    const portalCandidate = exactPortal || canaryCandidates.find(({ row }) => row.type === 'portal' && coordinatesFromGeocoder(row));
+    if (portalCandidate) return { coords: coordinatesFromGeocoder(portalCandidate.row), label: portalCandidate.row.address || rawAddress, quality: exactPortal ? 'portal exacto' : 'portal cercano', source: 'address' };
+
+    const pointCandidate = canaryCandidates.find(({ row }) => coordinatesFromGeocoder(row) && ['poblacion', 'municipio', 'entidadpoblacion', 'toponimo', 'poi', 'codigopostal'].includes(normalizeSearchText(row.type || '').replace(/\s/g, '')));
+    if (pointCandidate) return { coords: coordinatesFromGeocoder(pointCandidate.row), label: pointCandidate.row.address || rawAddress, quality: 'localidad aproximada', source: 'address-approx-locality' };
+
+    const streetCandidate = canaryCandidates.find(({ row }) => row.type === 'callejero' || /calle|avenida|carretera|vial|street|road/i.test(String(row.type || '')));
+    const findQueries = Array.from(new Set([streetCandidate && streetCandidate.row.address, streetCandidate && streetCandidate.query, rawAddress].filter(Boolean)));
+    const foundRows = await Promise.all(findQueries.slice(0, 3).map(async query => {
+      const url = CARTOCIUDAD_FIND_URL + '?' + new URLSearchParams({ q: query }).toString();
+      return await fetchGeocoderJson(url);
+    }));
+    for (const found of foundRows) {
+      const rows = (Array.isArray(found) ? found : found ? [found] : []).filter(Boolean);
+      const result = rows.find(row => {
+        const coords = coordinatesFromGeocoder(row);
+        return coords && coords[0] >= 26.5 && coords[0] <= 30.2 && coords[1] >= -18.7 && coords[1] <= -12.0 && (!province || !row.province || normalizeSearchText(row.province) === normalizeSearchText(province));
+      });
+      if (result) return { coords: coordinatesFromGeocoder(result), label: result.address || (streetCandidate && streetCandidate.row.address) || rawAddress, quality: 'calle localizada', source: 'address-approx-street' };
     }
-    throw new Error('CartoCiudad no encontró un punto fiable para esta dirección. Comprueba la dirección o abre «Ajustar el punto manualmente» para marcar el tejado.');
+    if (streetCandidate) {
+      const coords = coordinatesFromGeocoder(streetCandidate.row);
+      if (coords) return { coords, label: streetCandidate.row.address || rawAddress, quality: 'calle aproximada', source: 'address-approx-street' };
+    }
+
+    const canaryStatsResult = await geocodeWithCanaryStats(rawAddress, inferredIsland);
+    if (canaryStatsResult) return canaryStatsResult;
+
+    const fallbackIsland = inferredIsland || 'Gran Canaria';
+    return {
+      coords: ISLAND_CENTERS[fallbackIsland] || [28.30, -15.60],
+      label: rawAddress || (inferredIsland ? 'Centro de ' + inferredIsland : 'Ubicación general de Canarias'),
+      quality: inferredIsland ? 'centro aproximado de ' + fallbackIsland : 'centro aproximado de Canarias',
+      source: inferredIsland ? 'automatic-island' : 'automatic-region'
+    };
   }
   function openSolarConfig(workId) {
     const work = data.works.find(row => row.id === workId);
@@ -989,7 +1119,10 @@ notify pgrst, 'reload schema';`;
     const longitude = manualCoords ? savedCoords[1] : '';
     const mapRecord = coords.length ? { latitude: coords[0], longitude: coords[1] } : null;
     const mapLink = '<a class="text-link" href="' + esc(grafcanViewerUrl(mapRecord, site.island)) + '" target="_blank" rel="noopener">Abrir GRAFCAN para revisar la ubicación ↗</a>';
-    const locationMessage = coords.length ? '<div class="solar-autolocation"><strong>Ubicación tomada de la ficha</strong><span>' + esc(site.address || site.island || 'Coordenadas guardadas') + '</span></div>' : '<div class="solar-autolocation"><strong>Usaré la dirección para localizar la obra</strong><span>' + esc(site.address || 'No hay una dirección guardada todavía') + (site.island ? ' · ' + esc(site.island) : '') + '</span><small>Se consultará CartoCiudad, servicio oficial del CNIG. Solo se envía la dirección, no el nombre ni los datos de contacto.</small></div>';
+    const approximateLocation = savedCoords && (savedAddressMatches || !site.address) && /approx|automatic/.test(saved.locationSource || '');
+    const locationMessage = coords.length
+      ? '<div class="solar-autolocation"><strong>' + (approximateLocation ? 'Ubicación automática aproximada' : 'Ubicación tomada de la ficha') + '</strong><span>' + esc(site.address || site.island || saved.locationAddress || 'Coordenadas guardadas') + '</span>' + (approximateLocation ? '<small>' + esc(saved.locationQuality || 'Se ha usado el centro aproximado de la zona para que no tengas que introducir coordenadas.') + '. Si la dirección no está en el callejero, el cálculo PVGIS será aproximado.</small>' : '') + '</div>'
+      : '<div class="solar-autolocation"><strong>Localización automática de la obra</strong><span>' + esc(site.address || site.island || 'Se usará la ubicación general de Canarias') + (site.island ? ' · ' + esc(site.island) : '') + '</span><small>Buscaré la dirección en CartoCiudad y en el geocodificador del Gobierno de Canarias. Si no hay coincidencia, usaré automáticamente una ubicación aproximada de la isla o de Canarias. No tendrás que escribir coordenadas.</small></div>';
     const modal = '<div class="modal-backdrop" data-action="backdrop"><section class="modal solar-config-modal" role="dialog" aria-modal="true" aria-labelledby="solar-config-title"><div class="modal-head"><h2 id="solar-config-title">Configurar estudio PVGIS</h2><button type="button" class="close-btn" data-action="close-modal" aria-label="Cerrar">×</button></div><form id="solar-config-form" data-work-id="' + esc(workId) + '"><div class="modal-body"><p class="modal-note">' + esc(work.name) + ' · ' + esc(site.address || site.island || 'Ubicación por definir') + '</p>' + locationMessage + mapLink + '<details class="solar-manual-location"><summary>Ajustar el punto del tejado manualmente (opcional)</summary><p class="hint">Normalmente basta con la dirección. Usa estas coordenadas solo si quieres desplazar el punto hasta el tejado.</p><div class="fields solar-config-fields"><div class="field"><label for="solar-latitude">Latitud</label><input id="solar-latitude" name="latitude" type="number" step="0.000001" min="-90" max="90" value="' + esc(latitude) + '"></div><div class="field"><label for="solar-longitude">Longitud</label><input id="solar-longitude" name="longitude" type="number" step="0.000001" min="-180" max="180" value="' + esc(longitude) + '"></div></div></details><div class="fields solar-config-fields"><div class="field"><label for="solar-power">Potencia pico (kWp)</label><input id="solar-power" name="peakPower" type="number" min="0.1" max="1000" step="0.1" value="' + esc(saved.peakPower == null ? '5' : saved.peakPower) + '" required></div><div class="field"><label for="solar-loss">Pérdidas del sistema (%)</label><input id="solar-loss" name="loss" type="number" min="0" max="99" step="0.1" value="' + esc(saved.loss == null ? '14' : saved.loss) + '" required></div><div class="field"><label for="solar-tilt">Inclinación del panel (°)</label><input id="solar-tilt" name="tilt" type="number" min="0" max="90" step="1" value="' + esc(saved.tilt == null ? '15' : saved.tilt) + '" required></div><div class="field"><label for="solar-azimuth">Orientación (°)</label><input id="solar-azimuth" name="azimuth" type="number" min="-180" max="180" step="1" value="' + esc(saved.azimuth == null ? '0' : saved.azimuth) + '" required><span class="hint">0° sur · 90° oeste · −90° este</span></div><div class="field full"><label for="solar-mounting">Montaje</label><select id="solar-mounting" name="mounting"><option value="building"' + (saved.mounting !== 'free' ? ' selected' : '') + '>Sobre tejado / integrado en edificio</option><option value="free"' + (saved.mounting === 'free' ? ' selected' : '') + '>Estructura independiente</option></select></div></div><div class="solar-download-steps"><strong>Cómo guardar el resultado real</strong><ol><li>Guarda la configuración y abre PVGIS.</li><li>PVGIS descargará su resultado como archivo JSON.</li><li>Vuelve a esta obra y pulsa «Importar resultado JSON».</li></ol><p>El archivo queda guardado en la ficha y se sincroniza entre tus dispositivos.</p></div></div><div class="modal-foot"><span></span><div><button type="button" class="btn" data-action="close-modal">Cancelar</button><button type="submit" class="btn btn-primary">Guardar y calcular con PVGIS</button></div></div></form></section></div>';
     $('#modal-root').innerHTML = modal;
   }
@@ -1023,27 +1156,34 @@ notify pgrst, 'reload schema';`;
     let coords = latitudeInput && longitudeInput ? [num(latitudeInput), num(longitudeInput)] : site.coords;
     let locationSource = latitudeInput && longitudeInput ? 'manual' : 'linked';
     let locationLabel = site.address;
-    if (!coords && site.address) {
+    let locationQuality = site.coords ? 'coordenadas guardadas en la ficha' : '';
+    if (!coords) {
       const submit = $('[type="submit"]', form);
       if (submit) { submit.disabled = true; submit.textContent = 'Buscando dirección…'; }
       try {
         const located = await geocodeCanaryAddress(site.address, site.island);
         coords = located.coords;
-        locationLabel = located.label || site.address;
-        locationSource = 'address';
-      } catch (error) {
-        if (submit) { submit.disabled = false; submit.textContent = 'Guardar y calcular con PVGIS'; }
-        return toast(error && error.message || 'No se pudo localizar la dirección. Revisa la dirección o indica el punto manualmente.', 'bad');
+        locationLabel = located.label || site.address || site.island || 'Canarias';
+        locationSource = located.source || 'address';
+        locationQuality = located.quality || '';
+      } catch (_) {
+        const fallbackIsland = inferCanaryIsland(site.address, site.island);
+        coords = ISLAND_CENTERS[fallbackIsland] || [28.30, -15.60];
+        locationLabel = site.address || (fallbackIsland ? 'Centro de ' + fallbackIsland : 'Ubicación general de Canarias');
+        locationSource = fallbackIsland ? 'automatic-island' : 'automatic-region';
+        locationQuality = fallbackIsland ? 'centro aproximado de ' + fallbackIsland : 'centro aproximado de Canarias';
       }
+      if (submit) { submit.disabled = false; submit.textContent = 'Guardar y calcular con PVGIS'; }
     }
-    if (!coords) return toast('Esta obra no tiene dirección. Añade la dirección del cliente o de la obra, o fija el punto manualmente.', 'bad');
-    const config = { latitude: num(coords[0]), longitude: num(coords[1]), locationAddress: locationLabel || site.address || '', locationSource, peakPower: num(values.peakPower), loss: num(values.loss), tilt: num(values.tilt), azimuth: num(values.azimuth), mounting: values.mounting === 'free' ? 'free' : 'building', updatedAt: nowIso() };
+    const config = { latitude: num(coords[0]), longitude: num(coords[1]), locationAddress: locationLabel || site.address || site.island || 'Canarias', locationSource, locationQuality, peakPower: num(values.peakPower), loss: num(values.loss), tilt: num(values.tilt), azimuth: num(values.azimuth), mounting: values.mounting === 'free' ? 'free' : 'building', updatedAt: nowIso() };
     if (!Number.isFinite(config.latitude) || Math.abs(config.latitude) > 90 || !Number.isFinite(config.longitude) || Math.abs(config.longitude) > 180 || config.peakPower <= 0 || config.loss < 0 || config.loss >= 100 || config.tilt < 0 || config.tilt > 90 || config.azimuth < -180 || config.azimuth > 180) return toast('Revisa las coordenadas y los parámetros del sistema.', 'bad');
     const study = Object.assign({}, work.solarStudy || {}, { config });
     if (!commitChange(() => {
       work.solarStudy = study;
-      if (work.latitude == null || work.latitude === '') work.latitude = config.latitude;
-      if (work.longitude == null || work.longitude === '') work.longitude = config.longitude;
+      if (!/^automatic|approx/.test(locationSource)) {
+        if (work.latitude == null || work.latitude === '') work.latitude = config.latitude;
+        if (work.longitude == null || work.longitude === '') work.longitude = config.longitude;
+      }
       if (!work.address && site.address) work.address = site.address;
       if (!work.island && site.island) work.island = site.island;
       work.updatedAt = nowIso();
@@ -1051,7 +1191,7 @@ notify pgrst, 'reload schema';`;
     $('#modal-root').innerHTML = '';
     renderDetail('work', workId);
     openPVGISDownload(config);
-    toast('Configuración guardada. Cuando PVGIS descargue el JSON, impórtalo desde esta obra.', 'good');
+    toast((/^automatic|approx/.test(locationSource) ? 'Ubicación automática aproximada guardada (' + locationQuality + '). ' : 'Ubicación guardada. ') + 'Se abre PVGIS; después importa el JSON desde esta obra.', 'good');
   }
 
   function downloadSolarResult(workId) {
