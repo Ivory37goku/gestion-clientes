@@ -6,12 +6,17 @@ const { app, BrowserWindow, dialog, ipcMain, shell } = require('electron');
 
 const APP_ID = 'com.ivory37.gestionclientes.desktop';
 const APP_NAME = 'Gestión Clientes';
+const APP_INTERNAL_NAME = 'GestionClientes';
 const APP_DATA_DIR = 'Gestión Clientes';
 const HOSTED_HOST = 'ivory37goku.github.io';
 const HOSTED_PREFIX = '/gestion-clientes/';
 const HOSTED_URL = 'https://' + HOSTED_HOST + HOSTED_PREFIX;
 
-app.setName(APP_NAME);
+// Mantén el identificador que Electron añade al User-Agent en ASCII. Algunos
+// servidores (incluido el almacenamiento de sesiones de Supabase) interpretan
+// las cabeceras HTTP con UTF-8 estricto y rechazan la "ó" de "Gestión".
+app.setName(APP_INTERNAL_NAME);
+app.userAgentFallback = String(app.userAgentFallback || '').replace(/[^\x20-\x7E]/g, '?');
 app.setAppUserModelId(APP_ID);
 
 // Mantiene la carpeta de datos de usuario estable entre las actualizaciones.
