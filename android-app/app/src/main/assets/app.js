@@ -50,6 +50,19 @@ notify pgrst, 'reload schema';`;
   const CARTOCIUDAD_CANDIDATES_URL = 'https://www.cartociudad.es/geocoder/api/geocoder/candidates';
   const CARTOCIUDAD_FIND_URL = 'https://www.cartociudad.es/geocoder/api/geocoder/find';
   const CANARIAS_GEOCODER_URL = 'https://datos.canarias.es/api/estadisticas/georref/api/v1/search';
+  const BRAND_PALETTES = [
+    { id: 'solar', name: 'Solar premium', primary: '#A6D94A', secondary: '#557C35' },
+    { id: 'emerald', name: 'Esmeralda', primary: '#34D399', secondary: '#047857' },
+    { id: 'ocean', name: 'Océano', primary: '#38BDF8', secondary: '#0369A1' },
+    { id: 'amber', name: 'Ámbar', primary: '#FBBF24', secondary: '#B45309' },
+    { id: 'violet', name: 'Violeta', primary: '#A78BFA', secondary: '#6D28D9' },
+    { id: 'coral', name: 'Coral', primary: '#FB7185', secondary: '#BE123C' }
+  ];
+  const BRAND_ICON_SYMBOLS = [
+    { id: 'panel', name: 'Panel solar' }, { id: 'sun', name: 'Sol' },
+    { id: 'bolt', name: 'Energía' }, { id: 'monogram', name: 'Solo iniciales' }
+  ];
+  const BRAND_ICON_SHAPES = [{ id: 'rounded', name: 'Redondeado' }, { id: 'circle', name: 'Circular' }, { id: 'square', name: 'Cuadrado' }];
   const CLIENT_PORTAL_BASE_URL = 'https://ivory37goku.github.io/gestion-clientes/cliente.html';
   const SOLAR_PRICE_SOURCES = {
     canary: { label: 'Green Group Canarias · junio 2026', url: 'https://greengroupcanarias.com/precio-placas-solares-canarias-2026/' },
@@ -165,12 +178,32 @@ notify pgrst, 'reload schema';`;
   const monthFmt = (v) => v ? new Date(v + '-01T12:00:00').toLocaleDateString('es-ES', { month: 'long', year: 'numeric' }) : '';
   const optionHtml = (items, selected, emptyLabel) => '<option value="">' + esc(emptyLabel || 'Sin asignar') + '</option>' + items.map(x => '<option value="' + esc(x.id) + '"' + (String(x.id) === String(selected || '') ? ' selected' : '') + '>' + esc(x.name || x.title || 'Sin nombre') + '</option>').join('');
   const clone = (v) => JSON.parse(JSON.stringify(v));
-  const emptyData = () => ({ version: 1, company: { name: '', taxId: '', phone: '', email: '', address: '', currency: 'EUR', taxName: 'IGIC', taxRate: 7, owner: '', quoteCatalog: [] }, leads: [], clients: [], works: [], tasks: [], quotes: [], invoices: [], payments: [], expenses: [], events: [], documents: [], team: [], _meta: { deleted: {} } });
+  const isHexColor = value => /^#[0-9a-f]{6}$/i.test(String(value || ''));
+  function normalizeBranding(value) {
+    const source = value && typeof value === 'object' ? value : {};
+    const palette = BRAND_PALETTES.find(item => item.id === source.palette) || BRAND_PALETTES[0];
+    const monogram = String(source.monogram || 'GC').normalize('NFD').replace(/[\u0300-\u036f]/g, '').replace(/[^a-z0-9]/gi, '').slice(0, 3).toUpperCase() || 'GC';
+    const logoData = typeof source.logoData === 'string' && source.logoData.length <= 1250000 && /^data:image\/(?:png|webp|jpe?g);base64,/i.test(source.logoData) ? source.logoData : '';
+    return {
+      appName: String(source.appName || 'Gestión Clientes').trim().slice(0, 40) || 'Gestión Clientes',
+      tagline: String(source.tagline == null ? 'CLIENTES · OBRAS · FOTOVOLTAICA' : source.tagline).trim().slice(0, 54),
+      palette: BRAND_PALETTES.some(item => item.id === source.palette) ? source.palette : source.palette === 'custom' ? 'custom' : 'solar',
+      primaryColor: isHexColor(source.primaryColor) ? source.primaryColor : palette.primary,
+      secondaryColor: isHexColor(source.secondaryColor) ? source.secondaryColor : palette.secondary,
+      monogram,
+      iconSymbol: BRAND_ICON_SYMBOLS.some(item => item.id === source.iconSymbol) ? source.iconSymbol : 'panel',
+      iconShape: BRAND_ICON_SHAPES.some(item => item.id === source.iconShape) ? source.iconShape : 'rounded',
+      logoBackground: ['dark', 'light', 'transparent'].includes(source.logoBackground) ? source.logoBackground : 'dark',
+      logoData
+    };
+  }
+  const emptyData = () => ({ version: 1, company: { name: '', taxId: '', phone: '', email: '', address: '', currency: 'EUR', taxName: 'IGIC', taxRate: 7, owner: '', branding: normalizeBranding({}), quoteCatalog: [] }, leads: [], clients: [], works: [], tasks: [], quotes: [], invoices: [], payments: [], expenses: [], events: [], documents: [], team: [], _meta: { deleted: {} } });
 
   function normalize(input) {
     const source = input && typeof input === 'object' ? input : {};
     const out = emptyData();
     Object.assign(out.company, source.company && typeof source.company === 'object' ? source.company : {});
+    out.company.branding = normalizeBranding(out.company.branding);
     out.company.quoteCatalog = Array.isArray(out.company.quoteCatalog) ? out.company.quoteCatalog.filter(item => item && item.description).map((item, index) => Object.assign({ id: 'personal-' + (index + 1), group: 'personal', personal: true, category: 'Otros', unit: 'ud', unitPrice: 0, defaultQuantity: 1, source: 'custom', sourceNote: 'Tarifa guardada por la empresa.' }, item)) : [];
     // Migrate the old mainland IVA default to the general Canary Islands IGIC rate.
     if (!source.company || !source.company.taxName) {
@@ -218,6 +251,9 @@ notify pgrst, 'reload schema';`;
   let agendaMonth = today.slice(0, 7);
   let myDayDate = today;
   let islandFilter = 'all';
+  let brandLogoDraft = '';
+  let brandIconCacheKey = '';
+  let brandIconCacheData = '';
   const viewModes = { leads: 'board', works: 'board', tasks: 'board' };
   let activeDrag = null;
   let touchDrag = null;
@@ -295,7 +331,7 @@ notify pgrst, 'reload schema';`;
     const theme = localStorage.getItem(KEY + '_theme') === 'light' ? 'light' : 'dark';
     document.documentElement.dataset.theme = theme;
     const themeColor = $('meta[name="theme-color"]');
-    if (themeColor) themeColor.content = theme === 'light' ? '#f5f1e6' : '#0a0f0d';
+    if (themeColor) themeColor.content = normalizeBranding(data.company.branding).primaryColor;
     const toggle = $('#theme-toggle');
     if (toggle) {
       const nextTheme = theme === 'dark' ? 'claro' : 'oscuro';
@@ -451,8 +487,215 @@ notify pgrst, 'reload schema';`;
   }
   function personOption() { return data.team.filter(x => x.active !== false).map(x => ({ id: x.id, name: x.name })); }
 
+  function brandInkColor(brand) {
+    const luminance = hex => {
+      const channels = String(hex).slice(1).match(/.{2}/g).map(pair => parseInt(pair, 16) / 255).map(value => value <= 0.04045 ? value / 12.92 : Math.pow((value + 0.055) / 1.055, 2.4));
+      return channels[0] * 0.2126 + channels[1] * 0.7152 + channels[2] * 0.0722;
+    };
+    return luminance(brand.primaryColor) > 0.39 ? '#102018' : '#F8FAFC';
+  }
+  function traceBrandIconShape(ctx, size, shape) {
+    const inset = size * 0.045;
+    const side = size - inset * 2;
+    ctx.beginPath();
+    if (shape === 'circle') ctx.arc(size / 2, size / 2, side / 2, 0, Math.PI * 2);
+    else if (shape === 'square') ctx.rect(inset, inset, side, side);
+    else if (typeof ctx.roundRect === 'function') ctx.roundRect(inset, inset, side, side, size * 0.22);
+    else {
+      const radius = size * 0.22;
+      ctx.moveTo(inset + radius, inset); ctx.lineTo(inset + side - radius, inset); ctx.quadraticCurveTo(inset + side, inset, inset + side, inset + radius);
+      ctx.lineTo(inset + side, inset + side - radius); ctx.quadraticCurveTo(inset + side, inset + side, inset + side - radius, inset + side);
+      ctx.lineTo(inset + radius, inset + side); ctx.quadraticCurveTo(inset, inset + side, inset, inset + side - radius);
+      ctx.lineTo(inset, inset + radius); ctx.quadraticCurveTo(inset, inset, inset + radius, inset);
+    }
+    ctx.closePath();
+  }
+  function createBrandIcon(brand) {
+    const size = 512;
+    const canvas = document.createElement('canvas');
+    canvas.width = size; canvas.height = size;
+    const ctx = canvas.getContext('2d');
+    if (!ctx) return './icon-512.png';
+    const ink = brandInkColor(brand);
+    ctx.save();
+    traceBrandIconShape(ctx, size, brand.iconShape);
+    ctx.clip();
+    const gradient = ctx.createLinearGradient(20, 25, 492, 487);
+    gradient.addColorStop(0, brand.secondaryColor);
+    gradient.addColorStop(1, brand.primaryColor);
+    ctx.fillStyle = gradient; ctx.fillRect(0, 0, size, size);
+    ctx.fillStyle = 'rgba(255,255,255,.09)'; ctx.beginPath(); ctx.arc(390, 105, 185, 0, Math.PI * 2); ctx.fill();
+    ctx.strokeStyle = ink; ctx.fillStyle = ink; ctx.lineWidth = 15; ctx.lineCap = 'round'; ctx.lineJoin = 'round';
+    if (brand.iconSymbol === 'sun') {
+      const cx = size / 2; const cy = size * 0.34;
+      ctx.beginPath(); ctx.arc(cx, cy, 49, 0, Math.PI * 2); ctx.fill();
+      for (let angle = 0; angle < Math.PI * 2; angle += Math.PI / 4) {
+        ctx.beginPath(); ctx.moveTo(cx + Math.cos(angle) * 72, cy + Math.sin(angle) * 72); ctx.lineTo(cx + Math.cos(angle) * 100, cy + Math.sin(angle) * 100); ctx.stroke();
+      }
+    } else if (brand.iconSymbol === 'bolt') {
+      ctx.beginPath(); ctx.moveTo(290, 85); ctx.lineTo(166, 272); ctx.lineTo(244, 272); ctx.lineTo(213, 399); ctx.lineTo(354, 206); ctx.lineTo(274, 206); ctx.closePath(); ctx.fill();
+    } else if (brand.iconSymbol === 'panel') {
+      ctx.beginPath(); ctx.moveTo(131, 119); ctx.lineTo(382, 119); ctx.lineTo(344, 282); ctx.lineTo(165, 282); ctx.closePath(); ctx.fillStyle = 'rgba(255,255,255,.14)'; ctx.fill(); ctx.stroke();
+      ctx.lineWidth = 9; ctx.beginPath(); ctx.moveTo(212, 124); ctx.lineTo(197, 278); ctx.moveTo(296, 124); ctx.lineTo(313, 278); ctx.moveTo(145, 198); ctx.lineTo(363, 198); ctx.stroke();
+      ctx.lineWidth = 14; ctx.beginPath(); ctx.moveTo(255, 284); ctx.lineTo(255, 318); ctx.moveTo(201, 322); ctx.lineTo(309, 322); ctx.stroke();
+    }
+    ctx.shadowColor = 'rgba(0,0,0,.2)'; ctx.shadowBlur = 10; ctx.fillStyle = ink;
+    const monogram = brand.monogram || 'GC';
+    ctx.textAlign = 'center'; ctx.textBaseline = 'middle'; ctx.font = '900 ' + (brand.iconSymbol === 'monogram' ? 186 : 94) + 'px system-ui, sans-serif';
+    ctx.fillText(monogram, size / 2, brand.iconSymbol === 'monogram' ? 268 : 426, 360);
+    ctx.restore();
+    try { return canvas.toDataURL('image/png'); } catch (_) { return './icon-512.png'; }
+  }
+  function brandIconDataUrl(brand) {
+    const signature = [brand.primaryColor, brand.secondaryColor, brand.monogram, brand.iconSymbol, brand.iconShape].join('|');
+    if (signature !== brandIconCacheKey) { brandIconCacheKey = signature; brandIconCacheData = createBrandIcon(brand); }
+    return brandIconCacheData || './icon-512.png';
+  }
+  function applyBranding() {
+    const brand = normalizeBranding(data.company.branding);
+    data.company.branding = brand;
+    const root = document.documentElement;
+    const rgb = brand.primaryColor.slice(1).match(/.{2}/g).map(value => parseInt(value, 16)).join(' ');
+    root.style.setProperty('--brand', brand.primaryColor);
+    root.style.setProperty('--brand-secondary', brand.secondaryColor);
+    root.style.setProperty('--brand-rgb', rgb);
+    root.style.setProperty('--brand-ink', brandInkColor(brand));
+    const mark = $('#app-brand-mark');
+    const image = $('#app-brand-icon');
+    const icon = brandIconDataUrl(brand);
+    if (image) image.src = brand.logoData || icon;
+    if (mark) {
+      mark.classList.toggle('has-logo', Boolean(brand.logoData));
+      mark.dataset.iconShape = brand.iconShape;
+      mark.dataset.logoBackground = brand.logoBackground;
+    }
+    const brandName = $('#app-brand-name'); if (brandName) brandName.textContent = brand.appName;
+    const tagline = $('#app-brand-tagline'); if (tagline) tagline.textContent = brand.tagline;
+    const appMeta = $('#app-name-meta'); if (appMeta) appMeta.content = brand.appName;
+    const themeMeta = $('meta[name="theme-color"]'); if (themeMeta) themeMeta.content = brand.primaryColor;
+    $$('[data-brand-favicon]').forEach(link => { link.href = icon; link.type = 'image/png'; });
+  }
+
+  function readBrandingDraft(form) {
+    const values = {};
+    new FormData(form).forEach((value, key) => { if (typeof value === 'string') values[key] = value.trim(); });
+    values.logoData = brandLogoDraft;
+    return normalizeBranding(values);
+  }
+  function updateBrandingPreview() {
+    const form = $('#branding-form');
+    if (!form) return;
+    const brand = readBrandingDraft(form);
+    const rgb = brand.primaryColor.slice(1).match(/.{2}/g).map(value => parseInt(value, 16)).join(' ');
+    const root = document.documentElement;
+    root.style.setProperty('--brand', brand.primaryColor);
+    root.style.setProperty('--brand-secondary', brand.secondaryColor);
+    root.style.setProperty('--brand-rgb', rgb);
+    root.style.setProperty('--brand-ink', brandInkColor(brand));
+    $('#brand-preview-name').textContent = brand.appName;
+    $('#brand-preview-tagline').textContent = brand.tagline || 'VISTA PREVIA DE MARCA';
+    const appBrandName = $('#app-brand-name'); if (appBrandName) appBrandName.textContent = brand.appName;
+    const appTagline = $('#app-brand-tagline'); if (appTagline) appTagline.textContent = brand.tagline;
+    const previewMark = $('#brand-preview-mark');
+    const previewImage = $('#brand-preview-icon');
+    if (previewImage) previewImage.src = brand.logoData || brandIconDataUrl(brand);
+    if (previewMark) {
+      previewMark.classList.toggle('has-logo', Boolean(brand.logoData));
+      previewMark.dataset.iconShape = brand.iconShape;
+      previewMark.dataset.logoBackground = brand.logoBackground;
+    }
+    const iconPreview = $('#brand-icon-preview');
+    if (iconPreview) iconPreview.src = brandIconDataUrl(brand);
+    const appIcon = $('#app-brand-icon'); if (appIcon) appIcon.src = brand.logoData || brandIconDataUrl(brand);
+    const appMark = $('#app-brand-mark');
+    if (appMark) {
+      appMark.classList.toggle('has-logo', Boolean(brand.logoData));
+      appMark.dataset.iconShape = brand.iconShape;
+      appMark.dataset.logoBackground = brand.logoBackground;
+    }
+    const logoPreview = $('#brand-logo-preview');
+    if (logoPreview) {
+      logoPreview.replaceChildren();
+      if (brand.logoData) { const logo = new Image(); logo.src = brand.logoData; logo.alt = 'Vista previa del logo'; logoPreview.appendChild(logo); }
+      else { const placeholder = document.createElement('span'); placeholder.textContent = 'Sin logo'; logoPreview.appendChild(placeholder); }
+    }
+    const primaryLabel = $('#brand-primary') && $('#brand-primary').nextElementSibling;
+    const secondaryLabel = $('#brand-secondary') && $('#brand-secondary').nextElementSibling;
+    if (primaryLabel) primaryLabel.textContent = brand.primaryColor.toUpperCase();
+    if (secondaryLabel) secondaryLabel.textContent = brand.secondaryColor.toUpperCase();
+    $$('.brand-palette-option').forEach(button => button.setAttribute('aria-pressed', String(button.dataset.palette === brand.palette)));
+  }
+  function readImageAsBrandLogo(file) {
+    return new Promise((resolve, reject) => {
+      if (!file || !/^image\/(png|jpeg|webp)$/i.test(file.type)) return reject(new Error('Elige una imagen PNG, JPG o WebP.'));
+      if (file.size > 8 * 1024 * 1024) return reject(new Error('La imagen supera los 8 MB. Reduce su tamaño y vuelve a intentarlo.'));
+      const image = new Image();
+      const objectUrl = URL.createObjectURL(file);
+      image.onload = () => {
+        URL.revokeObjectURL(objectUrl);
+        const scale = Math.min(1, 640 / Math.max(image.naturalWidth, image.naturalHeight));
+        const canvas = document.createElement('canvas');
+        canvas.width = Math.max(1, Math.round(image.naturalWidth * scale));
+        canvas.height = Math.max(1, Math.round(image.naturalHeight * scale));
+        const context = canvas.getContext('2d');
+        if (!context) return reject(new Error('No se pudo procesar la imagen en este dispositivo.'));
+        context.drawImage(image, 0, 0, canvas.width, canvas.height);
+        let result = canvas.toDataURL('image/webp', 0.86);
+        if (!result.startsWith('data:image/webp')) result = canvas.toDataURL('image/png');
+        if (result.length > 1200000) {
+          const reduced = document.createElement('canvas');
+          const fit = 384 / Math.max(canvas.width, canvas.height);
+          reduced.width = Math.max(1, Math.round(canvas.width * fit));
+          reduced.height = Math.max(1, Math.round(canvas.height * fit));
+          const reducedContext = reduced.getContext('2d');
+          if (!reducedContext) return reject(new Error('No se pudo reducir la imagen.'));
+          reducedContext.drawImage(canvas, 0, 0, reduced.width, reduced.height);
+          result = reduced.toDataURL('image/webp', 0.78);
+          if (!result.startsWith('data:image/webp')) result = reduced.toDataURL('image/png');
+        }
+        if (result.length > 1250000) return reject(new Error('El archivo sigue ocupando demasiado. Prueba con un logo más sencillo.'));
+        resolve(result);
+      };
+      image.onerror = () => { URL.revokeObjectURL(objectUrl); reject(new Error('No se pudo abrir la imagen seleccionada.')); };
+      image.src = objectUrl;
+    });
+  }
+  function downloadBrandIcon(brand) {
+    const dataUrl = brandIconDataUrl(brand);
+    if (!dataUrl.startsWith('data:image/png;base64,')) { toast('No se pudo generar el icono en este dispositivo.', 'bad'); return; }
+    const encoded = dataUrl.slice(dataUrl.indexOf(',') + 1);
+    if (window.AndroidBridge && typeof window.AndroidBridge.saveFile === 'function') {
+      window.AndroidBridge.saveFile(encoded, 'icono-marca.png', 'image/png', String(Date.now()));
+    } else if (window.GestionClientesDesktopBridge && typeof window.GestionClientesDesktopBridge.saveFile === 'function') {
+      window.GestionClientesDesktopBridge.saveFile('icono-marca.png', 'image/png', encoded).then(saved => toast(saved ? 'Icono PNG guardado.' : 'No se guardó el icono.', saved ? 'good' : 'bad'));
+    } else {
+      const link = document.createElement('a'); link.href = dataUrl; link.download = 'icono-marca.png'; link.click();
+    }
+  }
+  function renderBrandSettings(nav) {
+    const brand = normalizeBranding(data.company.branding);
+    brandLogoDraft = brand.logoData;
+    const palettes = BRAND_PALETTES.map(item => '<button type="button" class="brand-palette-option" data-action="brand-palette" data-palette="' + item.id + '" aria-pressed="' + (brand.palette === item.id) + '"><span class="brand-palette-swatch" style="--swatch-primary:' + item.primary + ';--swatch-secondary:' + item.secondary + '"></span><span><strong>' + esc(item.name) + '</strong><small>' + esc(item.primary.toUpperCase()) + '</small></span></button>').join('');
+    const symbolOptions = BRAND_ICON_SYMBOLS.map(item => '<option value="' + item.id + '"' + (brand.iconSymbol === item.id ? ' selected' : '') + '>' + esc(item.name) + '</option>').join('');
+    const shapeOptions = BRAND_ICON_SHAPES.map(item => '<option value="' + item.id + '"' + (brand.iconShape === item.id ? ' selected' : '') + '>' + esc(item.name) + '</option>').join('');
+    const logoPreview = brand.logoData ? '<img src="' + brand.logoData + '" alt="Logo actual">' : '<span>Sin logo</span>';
+    return header('IDENTIDAD VISUAL', 'Tu marca', 'Personaliza los colores, el nombre y el icono que identifican a tu empresa.') + nav +
+      '<form id="branding-form" class="brand-settings-layout"><div class="stack">' +
+      '<section class="card brand-settings-card"><div class="card-head"><div><h2>Nombre e identidad</h2><p>Aparecen en la aplicación y en la propuesta que compartes con el cliente.</p></div></div><div class="fields">' +
+      settingsField('appName', 'Nombre visible de la app', brand.appName, 'text', 'full', 'Mi empresa') +
+      settingsField('tagline', 'Línea descriptiva', brand.tagline, 'text', 'full', 'INSTALACIONES · SERVICIO · ENERGÍA') +
+      settingsField('monogram', 'Iniciales del icono', brand.monogram, 'text', '', 'GC') +
+      '<div class="field"><label for="brand-symbol">Símbolo del icono</label><select id="brand-symbol" name="iconSymbol">' + symbolOptions + '</select></div>' +
+      '<div class="field"><label for="brand-shape">Forma del icono</label><select id="brand-shape" name="iconShape">' + shapeOptions + '</select></div></div></section>' +
+      '<section class="card brand-settings-card"><div class="card-head"><div><h2>Paleta de color</h2><p>El color elegido se aplica a los botones, indicadores y detalles de toda la app.</p></div></div><input id="brand-palette-id" name="palette" type="hidden" value="' + esc(brand.palette) + '"><div class="brand-palette-grid">' + palettes + '</div><div class="brand-colors-row"><div class="field"><label for="brand-primary">Color principal</label><div class="brand-color-input"><input id="brand-primary" name="primaryColor" type="color" value="' + esc(brand.primaryColor) + '"><span>' + esc(brand.primaryColor.toUpperCase()) + '</span></div></div><div class="field"><label for="brand-secondary">Color secundario</label><div class="brand-color-input"><input id="brand-secondary" name="secondaryColor" type="color" value="' + esc(brand.secondaryColor) + '"><span>' + esc(brand.secondaryColor.toUpperCase()) + '</span></div></div></div></section>' +
+      '<section class="card brand-settings-card"><div class="card-head"><div><h2>Logo de empresa</h2><p>Se adapta automáticamente y se incluye en los documentos imprimibles.</p></div></div><div class="brand-logo-row"><div class="brand-logo-preview" id="brand-logo-preview">' + logoPreview + '</div><div class="brand-logo-actions"><label class="btn" for="brand-logo-file">Subir logo</label><input id="brand-logo-file" type="file" accept="image/png,image/jpeg,image/webp" hidden><button type="button" class="btn btn-quiet" data-action="brand-remove-logo">Quitar logo</button><div class="field"><label for="brand-logo-background">Fondo del logo</label><select id="brand-logo-background" name="logoBackground"><option value="dark"' + (brand.logoBackground === 'dark' ? ' selected' : '') + '>Oscuro</option><option value="light"' + (brand.logoBackground === 'light' ? ' selected' : '') + '>Claro</option><option value="transparent"' + (brand.logoBackground === 'transparent' ? ' selected' : '') + '>Transparente</option></select></div><small class="hint">PNG, JPG o WebP. La imagen se reduce antes de guardarla.</small></div></div></section>' +
+      '<div class="head-actions brand-save-actions"><button class="btn btn-primary" type="submit">Guardar identidad</button><button class="btn" type="button" data-action="brand-reset">Descartar cambios</button></div></div>' +
+      '<aside class="card brand-preview-card"><p class="eyebrow">VISTA PREVIA</p><div class="brand-preview-lockup"><span class="brand-preview-mark" id="brand-preview-mark"><img id="brand-preview-icon" alt=""></span><span><strong id="brand-preview-name"></strong><small id="brand-preview-tagline"></small></span></div><div class="brand-preview-device"><div class="brand-preview-top"><span>Resumen</span><i></i></div><div class="brand-preview-hero"><small>INSTALACIONES FOTOVOLTAICAS</small><strong>Controla tu empresa<br>con tu identidad</strong><span class="brand-preview-cta">Crear presupuesto</span></div><div class="brand-preview-bars"><i></i><i></i><i></i></div></div><div class="brand-icon-download"><img id="brand-icon-preview" alt="Vista previa del icono generado"><div><strong>Icono de aplicación</strong><small>PNG de 512 × 512 px</small><button class="text-link" type="button" data-action="brand-download-icon">Descargar icono</button></div></div><p class="modal-note">Tu identidad se guarda con los datos de empresa, la copia JSON y la sincronización privada.</p></aside></form>';
+  }
+
   function render() {
-    document.title = (data.company.name || 'Gestión Clientes') + ' · ' + (TITLES[view] || 'Gestión');
+    applyBranding();
+    document.title = (normalizeBranding(data.company.branding).appName || data.company.name || 'Gestión Clientes') + ' · ' + (TITLES[view] || 'Gestión');
     $('#company-name-side').textContent = data.company.name || 'Mi empresa';
     $('#user-name-side').textContent = data.company.owner || 'Tu perfil';
     const initials = (data.company.owner || data.company.name || 'GC').trim().split(/\s+/).slice(0, 2).map(x => x[0]).join('').toUpperCase();
@@ -482,6 +725,7 @@ notify pgrst, 'reload schema';`;
       : view === 'finance' ? renderFinance()
       : view === 'documents' ? renderListView('documents')
       : renderListView(view);
+    if (view === 'settings' && settingsTab === 'marca') updateBrandingPreview();
   }
 
   function header(eyebrow, title, sub, actions) {
@@ -794,8 +1038,9 @@ notify pgrst, 'reload schema';`;
   }
 
   function renderSettings() {
-    const tabs = [['empresa', 'Empresa'], ['equipo', 'Equipo'], ['datos', 'Datos y nube']];
+    const tabs = [['empresa', 'Empresa'], ['marca', 'Marca'], ['equipo', 'Equipo'], ['datos', 'Datos y nube']];
     const nav = '<div class="settings-tabs">' + tabs.map(x => '<button class="' + (settingsTab === x[0] ? 'active' : '') + '" data-action="settings-tab" data-tab="' + x[0] + '">' + x[1] + '</button>').join('') + '</div>';
+    if (settingsTab === 'marca') return renderBrandSettings(nav);
     if (settingsTab === 'empresa') {
       return header('PERSONALIZACIÓN', 'Ajustes', 'Configura los datos de tu negocio y cómo quieres trabajar.') + nav +
         '<section class="card"><div class="card-head"><div><h2>Datos de empresa</h2><p>Se usarán en la aplicación y los informes.</p></div></div><form id="company-form"><div class="fields">' +
@@ -839,6 +1084,14 @@ notify pgrst, 'reload schema';`;
     return '<section class="quote-breakdown"><div class="card-head"><div><h3>Desglose de partidas</h3><p>Mano de obra, desplazamientos, materiales y otros conceptos.</p></div></div><div class="table-wrap"><table><thead><tr><th>Tipo</th><th>Descripción</th><th class="numeric">Cantidad</th><th>Unidad</th><th class="numeric">Precio / unidad</th><th class="numeric">Importe</th></tr></thead><tbody>' + rows + '</tbody><tfoot><tr><th colspan="5">Base imponible</th><th class="numeric">' + esc(money(item.amount)) + '</th></tr><tr><th colspan="5">' + esc(item.taxName || 'IGIC') + ' (' + esc(num(item.taxRate)) + '%)</th><th class="numeric">' + esc(money(taxAmount(item))) + '</th></tr><tr class="quote-total-row"><th colspan="5">TOTAL</th><th class="numeric">' + esc(money(total(item))) + '</th></tr></tfoot></table></div></section>' + quoteSolarSummary(item);
   }
 
+  function documentBrandMarkup(type, item) {
+    const brand = normalizeBranding(data.company.branding);
+    const image = brand.logoData || brandIconDataUrl(brand);
+    const title = type === 'invoice' ? 'Factura' : 'Presupuesto';
+    const details = [data.company.taxId, data.company.phone, data.company.email, data.company.address].filter(Boolean).join(' · ');
+    return '<header class="document-brandline" style="--document-brand:' + brand.primaryColor + ';--document-brand-secondary:' + brand.secondaryColor + '"><div class="document-brand-lockup"><span class="document-brand-mark" data-logo-background="' + esc(brand.logoBackground) + '"><img src="' + image + '" alt=""></span><span><strong>' + esc(data.company.name || brand.appName) + '</strong><small>' + esc(brand.tagline || brand.appName) + '</small></span></div><div class="document-company-contact">' + esc(details) + '</div><div class="document-number"><small>' + title + '</small><strong>' + esc(item.number || item.title || '') + '</strong></div></header>';
+  }
+
   function quoteSolarSummary(quote) {
     const work = data.works.find(row => row.id === quote.workId);
     const result = work && work.solarStudy && work.solarStudy.result;
@@ -866,9 +1119,10 @@ notify pgrst, 'reload schema';`;
     const client = data.clients.find(row => row.id === quote.clientId);
     const work = data.works.find(row => row.id === quote.workId);
     const study = work && work.solarStudy && work.solarStudy.result;
+    const brand = normalizeBranding(data.company.branding);
     return {
       version: 1,
-      company: { name: data.company.name || 'Nuestra empresa', phone: data.company.phone || '', email: data.company.email || '' },
+      company: { name: data.company.name || 'Nuestra empresa', phone: data.company.phone || '', email: data.company.email || '', brand: { appName: brand.appName, primaryColor: brand.primaryColor, secondaryColor: brand.secondaryColor, monogram: brand.monogram, iconShape: brand.iconShape } },
       clientName: client && (client.name || client.company) || '',
       quote: { title: quote.title || 'Propuesta de trabajo', number: quote.number || '', date: quote.date || '', validUntil: quote.validUntil || '', taxName: quote.taxName || 'IGIC', taxRate: num(quote.taxRate), amount: num(quote.amount), total: total(quote), notes: quote.notes || '', items: (Array.isArray(quote.items) ? quote.items : []).map(line => ({ category: line.category || 'Otros', description: line.description || '', quantity: num(line.quantity), unit: line.unit || 'ud', unitPrice: num(line.unitPrice), amount: quoteLineTotal(line) })) },
       solar: study ? { annualKwh: num(study.annualKwh), specificYield: num(study.specificYield), annualIrradiation: num(study.annualIrradiation), peakPower: num(study.config && study.config.peakPower), monthly: (study.monthly || []).map(row => ({ month: num(row.month), energyKwh: num(row.energyKwh) })) } : null
@@ -1557,14 +1811,15 @@ notify pgrst, 'reload schema';`;
     if (type === 'document') { add('Tipo', item.kind); add('Relacionado con', workName(item.workId) || selected(data.clients, item.clientId)); add('Enlace', item.url); add('Notas', item.notes); }
     if (type === 'team') { add('Puesto', item.role); add('Correo', item.email); add('Teléfono', item.phone); add('Estado', item.active === false ? 'Inactivo' : 'Activo'); }
     if (type === 'payment') { add('Factura', selected(data.invoices, item.invoiceId)); add('Fecha', dateFmt(item.date)); add('Método', item.method); add('Importe', money(item.amount)); add('Notas', item.notes); }
-    const extraActions = type === 'lead' && !item.clientId && item.stage !== 'Perdido' ? '<button type="button" class="btn btn-primary btn-sm" data-action="convert-lead" data-id="' + esc(id) + '">Pasar a cliente</button>' : type === 'quote' ? '<button class="btn btn-sm" data-action="print">Imprimir / guardar PDF</button><button type="button" class="btn btn-sm" data-action="share-quote" data-id="' + esc(id) + '">Vista de cliente / compartir</button>' + (item.status !== 'Rechazada' ? '<button class="btn btn-primary btn-sm" data-action="quote-to-invoice" data-id="' + esc(id) + '">Crear factura</button>' : '') : type === 'invoice' && outstanding(item) > 0 ? '<button class="btn btn-primary btn-sm" data-action="payment" data-id="' + esc(id) + '">Registrar cobro</button>' : '';
+    const extraActions = type === 'lead' && !item.clientId && item.stage !== 'Perdido' ? '<button type="button" class="btn btn-primary btn-sm" data-action="convert-lead" data-id="' + esc(id) + '">Pasar a cliente</button>' : type === 'quote' ? '<button class="btn btn-sm" data-action="print">Imprimir / guardar PDF</button><button type="button" class="btn btn-sm" data-action="share-quote" data-id="' + esc(id) + '">Vista de cliente / compartir</button>' + (item.status !== 'Rechazada' ? '<button class="btn btn-primary btn-sm" data-action="quote-to-invoice" data-id="' + esc(id) + '">Crear factura</button>' : '') : type === 'invoice' ? '<button class="btn btn-sm" data-action="print">Imprimir / guardar PDF</button>' + (outstanding(item) > 0 ? '<button class="btn btn-primary btn-sm" data-action="payment" data-id="' + esc(id) + '">Registrar cobro</button>' : '') : '';
     const breakdown = type === 'quote' ? quoteBreakdown(item) : type === 'invoice' && Array.isArray(item.items) && item.items.length ? quoteBreakdown(item) : '';
     const processPanel = type === 'lead' ? leadProcessPanel(item) : ['client', 'work'].includes(type) ? clientWorkProcessPanel(type, item, id) : '';
     const solarPanel = type === 'work' ? renderSolarStudyPanel(item, id) : '';
     const locationPanel = renderLocationPanel(type, item);
     const activityPanel = activityTimeline(type, item);
     const relationships = renderRelationships(type, item, id);
-    const modal = '<div class="modal-backdrop" data-action="backdrop"><section class="modal" role="dialog" aria-modal="true" aria-labelledby="detail-title"><div class="modal-head"><h2 id="detail-title">' + esc(title) + '</h2><button type="button" class="close-btn" data-action="close-modal" aria-label="Cerrar">×</button></div><div class="modal-body">' + processPanel + solarPanel + activityPanel + locationPanel + '<div class="list">' + facts.join('') + '</div>' + breakdown + relationships + '</div><div class="modal-foot"><div>' + extraActions + '</div><div><button type="button" class="btn btn-danger btn-sm" data-action="delete" data-type="' + type + '" data-id="' + esc(id) + '">Eliminar</button><button type="button" class="btn btn-primary btn-sm" data-action="edit" data-type="' + type + '" data-id="' + esc(id) + '">Editar</button></div></div></section></div>';
+    const documentHeader = ['quote', 'invoice'].includes(type) ? documentBrandMarkup(type, item) : '';
+    const modal = '<div class="modal-backdrop" data-action="backdrop"><section class="modal" role="dialog" aria-modal="true" aria-labelledby="detail-title"><div class="modal-head"><h2 id="detail-title">' + esc(title) + '</h2><button type="button" class="close-btn" data-action="close-modal" aria-label="Cerrar">×</button></div><div class="modal-body">' + documentHeader + processPanel + solarPanel + activityPanel + locationPanel + '<div class="list">' + facts.join('') + '</div>' + breakdown + relationships + '</div><div class="modal-foot"><div>' + extraActions + '</div><div><button type="button" class="btn btn-danger btn-sm" data-action="delete" data-type="' + type + '" data-id="' + esc(id) + '">Eliminar</button><button type="button" class="btn btn-primary btn-sm" data-action="edit" data-type="' + type + '" data-id="' + esc(id) + '">Editar</button></div></div></section></div>';
     $('#modal-root').innerHTML = modal;
   }
 
@@ -2366,6 +2621,24 @@ notify pgrst, 'reload schema';`;
 
   function handleAction(target) {
     const action = target.dataset.action;
+    if (action === 'brand-palette') {
+      const form = target.closest('#branding-form');
+      const palette = BRAND_PALETTES.find(item => item.id === target.dataset.palette);
+      if (!form || !palette) return;
+      $('[name="palette"]', form).value = palette.id;
+      $('[name="primaryColor"]', form).value = palette.primary;
+      $('[name="secondaryColor"]', form).value = palette.secondary;
+      updateBrandingPreview();
+      return;
+    }
+    if (action === 'brand-remove-logo') {
+      brandLogoDraft = '';
+      const input = $('#brand-logo-file'); if (input) input.value = '';
+      updateBrandingPreview();
+      return;
+    }
+    if (action === 'brand-reset') { render(); toast('Cambios de marca descartados.', 'good'); return; }
+    if (action === 'brand-download-icon') { const form = $('#branding-form'); if (form) downloadBrandIcon(readBrandingDraft(form)); return; }
     if (action === 'close-sidebar') { $('#sidebar').classList.remove('open'); return; }
     if (action === 'close-modal') { $('#modal-root').innerHTML = ''; return; }
     if (action === 'show-all-quote-catalog') {
@@ -2542,6 +2815,14 @@ notify pgrst, 'reload schema';`;
     if (event.target.id === 'entity-form') { event.preventDefault(); saveEntity(event.target); }
     else if (event.target.id === 'activity-form') { event.preventDefault(); saveActivity(event.target); }
     else if (event.target.id === 'solar-config-form') { event.preventDefault(); saveSolarConfiguration(event.target).catch(error => toast(error && error.message || 'No se pudo guardar la configuración PVGIS.', 'bad')); }
+    else if (event.target.id === 'branding-form') {
+      event.preventDefault();
+      const branding = readBrandingDraft(event.target);
+      if (commitChange(() => {
+        data.company.branding = branding;
+        data._meta.companyUpdated = Date.now();
+      })) { brandLogoDraft = branding.logoData; render(); toast('Identidad de marca guardada y sincronizada con tus datos.', 'good'); }
+    }
     else if (event.target.id === 'company-form') {
       event.preventDefault();
       const companyValues = {};
@@ -2559,6 +2840,15 @@ notify pgrst, 'reload schema';`;
     }
   });
   document.addEventListener('input', (event) => {
+    if (event.target.form && event.target.form.id === 'branding-form') {
+      if (['primaryColor', 'secondaryColor'].includes(event.target.name)) {
+        const primary = $('[name="primaryColor"]', event.target.form).value.toUpperCase();
+        const secondary = $('[name="secondaryColor"]', event.target.form).value.toUpperCase();
+        const match = BRAND_PALETTES.find(item => item.primary === primary && item.secondary === secondary);
+        $('[name="palette"]', event.target.form).value = match ? match.id : 'custom';
+      }
+      updateBrandingPreview();
+    }
     if (event.target.matches('[data-catalog-search]')) renderQuoteCatalog(event.target.form);
     if (event.target.matches('[data-solar-bundle-power]')) event.target.dataset.userSet = 'true';
     if (event.target.id === 'global-search-input') renderGlobalSearch(event.target.value);
@@ -2574,6 +2864,13 @@ notify pgrst, 'reload schema';`;
     if (event.target.form && event.target.form.id === 'entity-form' && $('[data-quote-line-list]', event.target.form)) updateQuoteTotals(event.target.form);
   });
   document.addEventListener('change', (event) => {
+    if (event.target.id === 'brand-logo-file') {
+      const file = event.target.files && event.target.files[0];
+      if (!file) return;
+      readImageAsBrandLogo(file).then(logoData => { brandLogoDraft = logoData; updateBrandingPreview(); toast('Logo preparado. Guarda la identidad para aplicarlo.', 'good'); })
+        .catch(error => { event.target.value = ''; toast(error.message || 'No se pudo preparar el logo.', 'bad'); });
+      return;
+    }
     if (event.target.matches('[data-catalog-group]')) { renderQuoteCatalog(event.target.form); return; }
     if (event.target.id === 'portal-share-language') { updateQuoteShareModal(event.target.value); return; }
     if (event.target.id === 'filter-select') { filterValue = event.target.value; render(); }

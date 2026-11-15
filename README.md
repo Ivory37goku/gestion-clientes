@@ -1,75 +1,113 @@
 # Gestión Clientes
 
-Aplicación independiente para organizar la actividad comercial, las operaciones
-y la postventa de una empresa. Este repositorio tiene su propia PWA, APK Android
-y aplicación para Windows. Puede usar la misma cuenta de Supabase que Control
-Laboral, pero conserva sus registros en una tabla separada.
+CRM y panel de operaciones para gestionar leads, clientes, instalaciones, presupuestos y facturas desde una sola aplicación. Está pensado para el trabajo diario de una empresa instaladora, con herramientas específicas para proyectos fotovoltaicos y la operativa fiscal de Canarias.
 
-## Qué incluye
+Gestión Clientes es un proyecto independiente de **Control Laboral**. Puede compartir el acceso a Supabase, pero guarda sus registros en `public.gestion_clientes`, separado de los datos de la otra aplicación.
 
-- Leads con embudo comercial, importe estimado, responsable y seguimiento.
-- Tableros Kanban para leads, tareas y obras, con cambio de fase desde cada tarjeta y alternativa en lista.
-- Segmentación de leads, clientes y obras por isla canaria, heredada automáticamente al convertir contactos o crear visitas y proyectos relacionados.
-- Flujo guiado de lead a cliente, obra, presupuesto y factura; acciones rápidas con el cliente y la obra ya vinculados.
-- Historial de llamadas, WhatsApp, correos, visitas y notas dentro de cada lead, cliente u obra, con tareas de seguimiento.
-- Clientes convertibles desde un lead y con varias obras asociadas.
-- Obras con fechas, presupuesto, estado, avance y responsable.
-- Ubicación heredada del lead al cliente y sus obras, con acción visible para actualizar fichas vinculadas.
-- Tareas por obra o cliente, con prioridades y vencimientos.
-- Estados de tarea diferenciados: pendiente, en curso, en espera, en revisión, hecha y cancelada; las tareas cerradas dejan de contar como abiertas o vencidas.
-- Mi día con navegación por fecha y resumen de tareas, visitas y seguimientos; incidencias, mantenimiento y checklists organizados sobre las tareas existentes.
-- Agenda de visitas, citas, tareas y seguimientos.
-- Panel operativo con alertas, actividad reciente, pipeline y accesos rápidos.
-- Presupuestos detallados con horas, tarifas, desplazamientos y materiales; cálculo e impresión/PDF con IGIC.
-- Estudios solares por obra con PVGIS 5.3: descarga e importación del resultado oficial, producción anual y mensual, rendimiento por kWp y resumen incluido en el presupuesto imprimible.
-- Página de propuesta para compartir con cada cliente en español, inglés o alemán, sin cuenta; muestra solo la oferta elegida y permite responder por correo o WhatsApp.
-- Facturas, vencimientos, pagos parciales y saldo pendiente.
-- Gastos por obra, enlaces a documentos, equipo e informes.
-- Copias JSON, exportación CSV, impresión/PDF y trabajo sin conexión.
-- Sincronización opcional con `public.gestion_clientes`, una tabla propia y privada en el proyecto Supabase compartido.
-- Buscador global con acceso directo a cada ficha, vista de prioridades y modos oscuro y claro.
-- Identidad visual independiente con tonos verdes naturales y crema.
+## Vista general
 
-## PWA y GitHub Pages
+### Identidad de empresa
 
-El workflow de Pages publica la PWA en:
+Personaliza el nombre visible, la línea descriptiva, los colores, las iniciales y la forma del icono. Puedes subir el logo de tu empresa, revisar una vista previa y descargar un icono PNG de 512 × 512 px. La identidad se guarda en el dispositivo, se incluye en la copia JSON y se sincroniza con tu cuenta privada.
 
-https://ivory37goku.github.io/gestion-clientes/
+![Ajustes de marca, paletas e icono personalizado](screenshots/brand-settings.jpg)
 
-En GitHub, activa Pages en Settings → Pages y selecciona GitHub Actions como
-fuente. Después de la primera publicación, abre esa dirección y añade la app a
-la pantalla de inicio. La PWA guarda su interfaz para usarla sin conexión.
+### Presupuestos para tus clientes
 
-## APK Android
+La propuesta compartida muestra la marca, los datos de la empresa, las partidas, el IGIC, las condiciones y, cuando está disponible, el estudio solar de la obra. El enlace abre una página de cliente sin necesidad de crear una cuenta.
 
-Abre android-app en Android Studio y compila con Build → Build APK(s), o ejecuta
-el wrapper desde esa carpeta con .\gradlew.bat assembleDebug. Cada compilación
-sincroniza primero los recursos web actuales con Android. El APK de depuración
-queda en android-app/app/build/outputs/apk/debug/app-debug.apk. El workflow de
-Android también publica ese APK como artifact en cada actualización de main.
+![Propuesta fotovoltaica de ejemplo con la identidad de empresa](screenshots/brand-proposal.jpg)
 
-El APK tiene su propio identificador Android y carga Gestión Clientes. Puede
-abrir la versión publicada cuando está disponible y conserva los archivos locales
-para seguir trabajando sin conexión.
+Las capturas usan datos ficticios para enseñar la interfaz.
 
-Descarga directa de Android: [Gestión Clientes 1.0.14](https://raw.githubusercontent.com/Ivory37goku/gestion-clientes/main/downloads/gestion-clientes-1.0.14.apk).
+## Funcionalidades
 
-## Windows
+### CRM y clientes
 
-Con Node.js instalado, ejecuta npm install y npm run dist:win desde la raíz del
-repositorio. Se generan un instalador y una versión portable en desktop-dist.
-El workflow de Windows adjunta ambos EXE como artifacts de GitHub Actions.
+- Embudo de leads con seguimiento, responsables, valor estimado e historial de llamadas, visitas, correos, WhatsApp y notas.
+- Conversión guiada de lead a cliente y, si procede, creación de su primera obra vinculada.
+- Fichas relacionadas de clientes, obras, presupuestos, facturas, documentos y tareas.
+- Búsqueda global, filtros por isla y vistas de lista y tablero Kanban con movimiento de tarjetas.
 
-## Sincronización en la nube
+### Obras y equipo
 
-En Ajustes → Datos y nube, usa el mismo correo y contraseña que en Control
-Laboral. Descarga el SQL de Gestión Clientes desde esa pantalla y ejecútalo una
-vez en el Editor SQL del proyecto Supabase. Crea solamente
-`public.gestion_clientes`, con acceso privado por usuario, y solicita recargar la
-caché del esquema. No modifica `public.ivory37_sync` ni los datos de Control
-Laboral. Las dos apps comparten el acceso y mantienen sus registros separados;
-también siguen guardando cambios localmente si no hay conexión.
+- Obras con estado, fechas, avance, responsable, presupuesto y ubicación.
+- Dirección, isla y coordenadas heredadas entre el lead, el cliente y la obra para reducir la entrada repetida de datos.
+- Tareas, visitas, agenda, incidencias, mantenimiento y checklists conectados al trabajo.
+- Acceso a la dirección y acciones rápidas para contactar al cliente.
 
-Las invitaciones y confirmaciones de correo de Supabase dependen de las URL
-permitidas en Authentication → URL Configuration. Añade la dirección de esta
-PWA si quieres que esos correos vuelvan directamente a Gestión Clientes.
+### Instalaciones fotovoltaicas
+
+- Estudio de producción solar por obra mediante PVGIS 5.3, con producción mensual y anual y rendimiento específico.
+- Resultado solar incluido en el presupuesto y en la propuesta compartida cuando la obra tiene un estudio guardado.
+- Catálogo de partidas fotovoltaicas con material, inversores, baterías, estructura, mano de obra, desplazamientos y legalización. Las cantidades y precios se pueden ajustar o guardar como tarifa propia.
+- Desglose de presupuesto con horas, trayectos, materiales, base imponible, IGIC y total. Se puede imprimir o guardar como PDF.
+
+### Administración y marca
+
+- Facturas, vencimientos, pagos parciales, cobros pendientes y gastos asociados a las obras.
+- Exportación CSV, copias de seguridad JSON, restauración y uso local sin conexión.
+- Modos oscuro y claro y personalización de la marca para la app, los documentos imprimibles y las propuestas de cliente.
+- IGIC general de Canarias como tipo inicial; el porcentaje se puede modificar para cada operación.
+
+## Descarga e instalación
+
+| Plataforma | Descarga o acceso |
+| --- | --- |
+| Web / PWA | [Abrir Gestión Clientes](https://ivory37goku.github.io/gestion-clientes/) |
+| Android | [Descargar APK 1.0.15](https://raw.githubusercontent.com/Ivory37goku/gestion-clientes/main/downloads/gestion-clientes-1.0.15.apk) |
+| Windows | [Abrir las compilaciones de Windows](https://github.com/Ivory37goku/gestion-clientes/actions/workflows/windows.yml) |
+
+En Android, descarga el APK e instálalo desde el dispositivo. En Windows, abre la última ejecución correcta del workflow y descarga el artefacto `gestion-clientes-windows`, que contiene el instalador y la versión portable. La PWA también se puede añadir a la pantalla de inicio desde el navegador.
+
+## Sincronización privada
+
+En **Ajustes → Datos y nube**, inicia sesión con la misma cuenta que usas en Control Laboral. Ejecuta una vez el archivo SQL que proporciona la app para crear la tabla privada `public.gestion_clientes` en tu proyecto Supabase.
+
+La tabla pertenece solo a Gestión Clientes. No sustituye ni modifica `public.ivory37_sync`. Si no hay conexión o no usas una cuenta, los datos siguen guardándose localmente y puedes moverlos mediante una copia JSON.
+
+Para que las invitaciones y confirmaciones de Supabase regresen a la app, añade la dirección de GitHub Pages a **Authentication → URL Configuration** del proyecto.
+
+## Compilar desde el código
+
+### PWA
+
+Abre `index.html` con un servidor estático para desarrollo. El workflow de GitHub Pages publica la aplicación en [ivory37goku.github.io/gestion-clientes](https://ivory37goku.github.io/gestion-clientes/).
+
+### APK Android
+
+Con Java 17 y Android SDK disponibles, ejecuta desde `android-app`:
+
+```powershell
+.\gradlew.bat assembleDebug
+```
+
+Antes de compilar, Gradle sincroniza la versión web actual con los recursos de Android. El APK se genera en `android-app/app/build/outputs/apk/debug/app-debug.apk`.
+
+### Windows
+
+Con Node.js instalado, ejecuta desde la raíz:
+
+```powershell
+npm ci
+npm run dist:win
+```
+
+El instalador NSIS y la aplicación portable se crean en `desktop-dist`. El workflow de Windows los publica como artefactos de cada compilación de `main`.
+
+## Estructura del proyecto
+
+| Ruta | Contenido |
+| --- | --- |
+| `index.html`, `app.js`, `styles.css` | Aplicación web y PWA |
+| `cliente.html` | Página pública de las propuestas compartidas |
+| `supabase-config.js` | Configuración de conexión a Supabase; no contiene contraseñas de usuarios |
+| `android-app/` | Contenedor Android y proceso de sincronización de recursos web |
+| `desktop/` | Aplicación Windows con Electron |
+| `downloads/` | APK Android de descarga directa |
+| `screenshots/` | Capturas reales de la interfaz incluidas en este README |
+| `.github/workflows/` | Publicación de Pages y compilaciones Android y Windows |
+
+## Tecnologías
+
+PWA con HTML, CSS y JavaScript, almacenamiento local, service worker y sincronización opcional mediante Supabase. Android se empaqueta con WebView y la aplicación de escritorio con Electron.
