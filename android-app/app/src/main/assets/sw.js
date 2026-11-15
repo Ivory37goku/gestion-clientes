@@ -1,6 +1,6 @@
 'use strict';
 
-const CACHE = 'gestion-clientes-v18';
+const CACHE = 'gestion-clientes-v19';
 const ASSETS = [
   './',
   './index.html',

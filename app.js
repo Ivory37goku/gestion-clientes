@@ -53,28 +53,91 @@ notify pgrst, 'reload schema';`;
   const CLIENT_PORTAL_BASE_URL = 'https://ivory37goku.github.io/gestion-clientes/cliente.html';
   const SOLAR_PRICE_SOURCES = {
     canary: { label: 'Green Group Canarias · junio 2026', url: 'https://greengroupcanarias.com/precio-placas-solares-canarias-2026/' },
-    market: { label: 'GreenExperts · precios de mercado, mayo 2026', url: 'https://greenexperts.es/guia-precios/placas-solares/precio-instalacion-fotovoltaica-5-kw/' },
-    prices: { label: 'GreenExperts · desglose por kWp, mayo 2026', url: 'https://greenexperts.es/guia-precios/placas-solares/instalar-placas-solares/' },
+    market: { label: 'GreenExperts · desglose residencial fotovoltaico 2026', url: 'https://greenexperts.es/guia-precios/placas-solares/precio-instalacion-fotovoltaica-5-kw/' },
+    prices: { label: 'GreenExperts · desglose fotovoltaico 2026', url: 'https://greenexperts.es/guia-precios/placas-solares/instalar-placas-solares/' },
     cype: { label: 'CYPE · generador de precios, coste directo', url: 'https://generadordeprecios.info/obra_nueva/Instalaciones/Electricas/Solar_fotovoltaica/Modulo_solar_fotovoltaico.html' },
+    preoc: { label: 'PREOC 2026 · módulo fotovoltaico 450 Wp instalado', url: 'https://www.preoc.es/base_de_precios/D45AG160/PANEL%20ERA%20450W%2024V%20MONOCRISTALINO%20PERC' },
     travel: { label: 'Tarifa publicada en Tenerife · consulta noviembre 2026', url: 'https://okservice.es/servicios/energias-renovables-tenerife' }
   };
   const SOLAR_QUOTE_CATALOG = [
     { id: 'kit-3kwp', group: 'kits', category: 'Otros', description: 'Instalación fotovoltaica residencial 3 kWp sin batería · llave en mano', unit: 'servicio', unitPrice: 5000, defaultQuantity: 1, range: '4.500–5.500 €', source: 'canary', sourceNote: 'Incluye sistema y montaje según la referencia publicada. No lo combines con las mismas partidas desglosadas.' },
     { id: 'kit-5kwp', group: 'kits', category: 'Otros', description: 'Instalación fotovoltaica residencial 5 kWp sin batería · llave en mano', unit: 'servicio', unitPrice: 7000, defaultQuantity: 1, range: '6.000–8.000 €', source: 'canary', sourceNote: 'Incluye sistema y montaje según la referencia publicada. No lo combines con las mismas partidas desglosadas.' },
     { id: 'kit-5kwp-battery', group: 'kits', category: 'Otros', description: 'Instalación fotovoltaica 5 kWp con batería 5 kWh · llave en mano', unit: 'servicio', unitPrice: 10250, defaultQuantity: 1, range: '9.000–11.500 €', source: 'canary', sourceNote: 'Paquete completo con batería. No lo combines con las mismas partidas desglosadas.' },
-    { id: 'panel-tier1', group: 'materiales', category: 'Material', description: 'Panel fotovoltaico monocristalino TOPCon 425–460 Wp · gama Tier 1', unit: 'ud', unitPrice: 130, defaultQuantity: 12, range: '110–150 €/panel', source: 'market', sourceNote: 'Precio orientativo de suministro; verifica marca, potencia, stock y transporte.' },
-    { id: 'inverter-string', group: 'materiales', category: 'Material', description: 'Inversor fotovoltaico string monofásico 5 kW', unit: 'ud', unitPrice: 850, defaultQuantity: 1, range: '700–1.350 €/equipo', source: 'market', sourceNote: 'Precio de equipo, sin añadir montaje ni legalización.' },
-    { id: 'inverter-hybrid', group: 'materiales', category: 'Material', description: 'Inversor híbrido monofásico 5 kW preparado para batería', unit: 'ud', unitPrice: 1250, defaultQuantity: 1, range: '1.000–1.850 €/equipo', source: 'market', sourceNote: 'Precio de equipo; el rango depende de marca y gama.' },
-    { id: 'battery-5kwh', group: 'materiales', category: 'Material', description: 'Ampliación con batería LFP de 5 kWh instalada', unit: 'ud', unitPrice: 4250, defaultQuantity: 1, range: '3.500–5.000 €/sistema', source: 'market', sourceNote: 'Incremento orientativo para añadir almacenamiento; comprueba compatibilidad con el inversor.' },
-    { id: 'structure-tile', group: 'materiales', category: 'Material', description: 'Estructura certificada para cubierta inclinada de teja · juego por módulo', unit: 'ud', unitPrice: 50, defaultQuantity: 12, range: '450–750 € para 12 módulos', source: 'market', sourceNote: 'Precio de referencia para una instalación residencial típica de 12 paneles.' },
-    { id: 'structure-flat', group: 'materiales', category: 'Material', description: 'Estructura lastrada para cubierta plana · juego por módulo', unit: 'ud', unitPrice: 67, defaultQuantity: 12, range: '700–900 € para 12 módulos', source: 'market', sourceNote: 'Precio de referencia para una instalación residencial típica de 12 paneles.' },
-    { id: 'wiring-protection', group: 'materiales', category: 'Material', description: 'Cableado FV, conectores y protecciones DC/AC para sistema monofásico', unit: 'kWp', unitPrice: 80, defaultQuantity: 5, range: '300–500 € para 5 kWp (60–100 €/kWp)', source: 'market', sourceNote: 'Precio prorrateado por potencia; dimensiona secciones, distancias y protecciones según proyecto y REBT.' },
-    { id: 'mounting-labor', group: 'montaje', category: 'Mano de obra', description: 'Montaje, conexionado y puesta en marcha residencial · precio de referencia por kWp', unit: 'kWp', unitPrice: 300, defaultQuantity: 5, range: '250–450 €/kWp', source: 'prices', sourceNote: 'Partida de mano de obra; ajusta los kWp y evita sumarla junto con las horas del equipo.' },
+    { id: 'panel-tier1', group: 'modulos', category: 'Material', description: 'Panel fotovoltaico monocristalino TOPCon 425–460 Wp · gama Tier 1', unit: 'ud', unitPrice: 130, defaultQuantity: 12, panelWp: 450, quantityRule: 'panels', featured: true, range: '110–155 €/panel', source: 'market', sourceNote: 'Precio orientativo de suministro; verifica marca, potencia, stock y transporte.' },
+    { id: 'inverter-string', group: 'inversores', category: 'Material', description: 'Inversor fotovoltaico string monofásico 5 kW', unit: 'ud', unitPrice: 850, defaultQuantity: 1, featured: true, range: '700–1.350 €/equipo', source: 'market', sourceNote: 'Precio de equipo, sin añadir montaje ni legalización.' },
+    { id: 'inverter-hybrid', group: 'inversores', category: 'Material', description: 'Inversor híbrido monofásico 5 kW preparado para batería', unit: 'ud', unitPrice: 1250, defaultQuantity: 1, featured: true, range: '1.000–1.850 €/equipo', source: 'market', sourceNote: 'Precio de equipo; el rango depende de marca y gama.' },
+    { id: 'battery-5kwh', group: 'baterias', category: 'Material', description: 'Ampliación con batería LFP de 5 kWh instalada', unit: 'ud', unitPrice: 4250, defaultQuantity: 1, featured: true, range: '3.500–5.000 €/sistema', source: 'market', sourceNote: 'Incremento orientativo para añadir almacenamiento; comprueba compatibilidad con el inversor.' },
+    { id: 'structure-tile', group: 'estructuras', category: 'Material', description: 'Estructura certificada para cubierta inclinada de teja · juego por módulo', unit: 'ud', unitPrice: 50, defaultQuantity: 12, panelWp: 450, quantityRule: 'panels', featured: true, range: '500–750 € para 12 paneles', source: 'market', sourceNote: 'Referencia de estructura, sin paneles. Comprueba rastreles, teja, anclajes y estanqueidad.' },
+    { id: 'structure-flat', group: 'estructuras', category: 'Material', description: 'Estructura lastrada para cubierta plana · juego por módulo', unit: 'ud', unitPrice: 67, defaultQuantity: 12, panelWp: 450, quantityRule: 'panels', range: '700–900 € para 12 paneles', source: 'market', sourceNote: 'Referencia para estructura lastrada; valida cargas, viento, inclinación y membrana.' },
+    { id: 'wiring-protection', group: 'electricos', category: 'Material', description: 'Cableado FV, conectores y protecciones DC/AC para sistema monofásico', unit: 'kWp', unitPrice: 80, defaultQuantity: 5, quantityRule: 'kwp', featured: true, range: '300–500 € para 5 kWp (60–100 €/kWp)', source: 'market', sourceNote: 'Precio prorrateado por potencia; dimensiona secciones, distancias y protecciones según proyecto y REBT.' },
+    { id: 'mounting-labor', group: 'montaje', category: 'Mano de obra', description: 'Montaje, conexionado y puesta en marcha residencial · precio de referencia por kWp', unit: 'kWp', unitPrice: 300, defaultQuantity: 5, quantityRule: 'kwp', featured: true, range: '250–450 €/kWp', source: 'prices', sourceNote: 'Partida de mano de obra; evita duplicarla con horas del equipo o con un pack llave en mano.' },
     { id: 'electrician-hour', group: 'montaje', category: 'Mano de obra', description: 'Oficial de 1.ª electricista · coste directo base de referencia', unit: 'horas', unitPrice: 25.52, defaultQuantity: 8, range: '25,52 €/hora de coste directo', source: 'cype', sourceNote: 'Coste directo base publicado por CYPE; añade tu estructura y margen comercial.' },
     { id: 'helper-hour', group: 'montaje', category: 'Mano de obra', description: 'Ayudante electricista · coste directo base de referencia', unit: 'horas', unitPrice: 23.54, defaultQuantity: 8, range: '23,54 €/hora de coste directo', source: 'cype', sourceNote: 'Coste directo base publicado por CYPE; añade tu estructura y margen comercial.' },
-    { id: 'legalization', group: 'gestion', category: 'Otros', description: 'Memoria técnica, CIE y tramitación de autoconsumo residencial <10 kW', unit: 'servicio', unitPrice: 400, defaultQuantity: 1, range: '300–500 €/servicio orientativo', source: 'market', sourceNote: 'Comprueba el alcance, tasas y requisitos concretos de la instalación en Canarias.' },
+    { id: 'legalization', group: 'gestion', category: 'Otros', description: 'Memoria técnica, CIE y tramitación de autoconsumo residencial <10 kW', unit: 'servicio', unitPrice: 400, defaultQuantity: 1, featured: true, range: '300–500 €/servicio orientativo', source: 'market', sourceNote: 'Comprueba el alcance, tasas y requisitos concretos de la instalación en Canarias.' },
     { id: 'scaffold', group: 'montaje', category: 'Otros', description: 'Medios auxiliares por altura o acceso difícil (andamio/plataforma)', unit: 'servicio', unitPrice: 350, defaultQuantity: 1, range: '200–500 € adicionales', source: 'market', sourceNote: 'Añadir solo cuando la altura y el acceso lo requieran.' },
-    { id: 'travel-visit', group: 'gestion', category: 'Desplazamiento', description: 'Desplazamiento técnico dentro de la isla · visita/trayecto', unit: 'trayecto', unitPrice: 50, defaultQuantity: 1, range: '≈26,71–80,55 € con IGIC en la tarifa consultada', source: 'travel', sourceNote: 'Referencia de un servicio publicado en Tenerife; valor de partida aproximado sin IGIC. Ajusta por isla, distancia y viajes interinsulares.' }
+    { id: 'travel-visit', group: 'gestion', category: 'Desplazamiento', description: 'Desplazamiento técnico dentro de la isla · visita/trayecto', unit: 'trayecto', unitPrice: 50, defaultQuantity: 1, featured: true, range: '≈26,71–80,55 € con IGIC en la tarifa consultada', source: 'travel', sourceNote: 'Referencia de un servicio publicado en Tenerife; valor de partida aproximado sin IGIC. Ajusta por isla, distancia y viajes interinsulares.' },
+    { id: 'kit-8kwp', group: 'kits', category: 'Otros', description: 'Instalación fotovoltaica residencial 8 kWp sin batería · llave en mano', unit: 'servicio', unitPrice: 10000, defaultQuantity: 1, range: '8.500–11.500 €', source: 'market', sourceNote: 'Paquete residencial orientativo. No lo combines con las partidas desglosadas del mismo alcance.' },
+    { id: 'kit-10kwp', group: 'kits', category: 'Otros', description: 'Instalación fotovoltaica residencial 10 kWp sin batería · llave en mano', unit: 'servicio', unitPrice: 14000, defaultQuantity: 1, range: '12.000–16.000 €', source: 'market', sourceNote: 'Referencia nacional orientativa; confirma trifásica, cubierta, protecciones, legalización y transporte a Canarias.' },
+    { id: 'kit-5kwp-battery-10', group: 'kits', category: 'Otros', description: 'Instalación fotovoltaica 5 kWp con batería LFP 10 kWh · llave en mano', unit: 'servicio', unitPrice: 13000, defaultQuantity: 1, range: '11.000–15.000 €', source: 'market', sourceNote: 'Paquete completo orientativo. No lo combines con las partidas desglosadas del mismo alcance.' },
+    { id: 'kit-8kwp-battery-10', group: 'kits', category: 'Otros', description: 'Instalación fotovoltaica 8 kWp con batería LFP 10 kWh · llave en mano', unit: 'servicio', unitPrice: 16500, defaultQuantity: 1, range: '14.000–19.000 €', source: 'market', sourceNote: 'Paquete completo orientativo. Comprueba potencia de inversor, fases, espacio y compatibilidad.' },
+    { id: 'panel-bifacial', group: 'modulos', category: 'Material', description: 'Panel fotovoltaico TOPCon bifacial 440–460 Wp · gama premium', unit: 'ud', unitPrice: 155, defaultQuantity: 12, panelWp: 450, quantityRule: 'panels', range: '130–190 €/panel', source: 'market', sourceNote: 'Suministro sin estructura ni montaje. La ganancia bifacial depende de la superficie reflectante y el montaje.' },
+    { id: 'panel-fullblack', group: 'modulos', category: 'Material', description: 'Panel fotovoltaico monocristalino full black 425–460 Wp', unit: 'ud', unitPrice: 150, defaultQuantity: 12, panelWp: 450, quantityRule: 'panels', range: '125–180 €/panel', source: 'market', sourceNote: 'Suministro orientativo; confirma modelo, potencia, garantía y disponibilidad.' },
+    { id: 'panel-installed-preoc', group: 'modulos', category: 'Material', description: 'Suministro y colocación de módulo fotovoltaico monocristalino 450 Wp', unit: 'ud', unitPrice: 190, defaultQuantity: 12, panelWp: 450, quantityRule: 'panels', range: '≈190 €/ud en la partida PREOC consultada', source: 'preoc', sourceNote: 'La partida de referencia incluye colocación y mano de obra básica por panel; no la sumes con el montaje de esos mismos paneles.' },
+    { id: 'inverter-string-3', group: 'inversores', category: 'Material', description: 'Inversor string monofásico 3 kW · sin batería', unit: 'ud', unitPrice: 650, defaultQuantity: 1, range: '550–850 €/equipo', source: 'market', sourceNote: 'Suministro del equipo; comprueba MPPT, tensión de strings, garantía y monitorización.' },
+    { id: 'inverter-string-8', group: 'inversores', category: 'Material', description: 'Inversor string trifásico 8 kW · sin batería', unit: 'ud', unitPrice: 1400, defaultQuantity: 1, range: '1.100–1.900 €/equipo', source: 'market', sourceNote: 'Suministro del equipo; selecciona la fase según acometida y diseño eléctrico.' },
+    { id: 'inverter-string-10', group: 'inversores', category: 'Material', description: 'Inversor string trifásico 10 kW · sin batería', unit: 'ud', unitPrice: 1750, defaultQuantity: 1, range: '1.400–2.400 €/equipo', source: 'market', sourceNote: 'Suministro del equipo; selecciona la fase según acometida y diseño eléctrico.' },
+    { id: 'inverter-string-15', group: 'inversores', category: 'Material', description: 'Inversor string trifásico 15 kW · sin batería', unit: 'ud', unitPrice: 2300, defaultQuantity: 1, range: '1.900–3.000 €/equipo', source: 'market', sourceNote: 'Suministro del equipo; verifica cálculo de strings, tensión máxima y requisitos de conexión.' },
+    { id: 'inverter-string-20', group: 'inversores', category: 'Material', description: 'Inversor string trifásico 20 kW · sin batería', unit: 'ud', unitPrice: 2850, defaultQuantity: 1, range: '2.400–3.800 €/equipo', source: 'market', sourceNote: 'Suministro del equipo; verifica cálculo de strings, tensión máxima y requisitos de conexión.' },
+    { id: 'inverter-hybrid-3', group: 'inversores', category: 'Material', description: 'Inversor híbrido monofásico 3 kW preparado para batería', unit: 'ud', unitPrice: 1000, defaultQuantity: 1, range: '850–1.350 €/equipo', source: 'market', sourceNote: 'Suministro del equipo; confirma batería compatible y protocolo de comunicaciones.' },
+    { id: 'inverter-hybrid-8', group: 'inversores', category: 'Material', description: 'Inversor híbrido trifásico 8 kW preparado para batería', unit: 'ud', unitPrice: 1900, defaultQuantity: 1, range: '1.600–2.600 €/equipo', source: 'market', sourceNote: 'Suministro del equipo; confirma batería compatible, fases y potencia de respaldo.' },
+    { id: 'inverter-hybrid-10', group: 'inversores', category: 'Material', description: 'Inversor híbrido trifásico 10 kW preparado para batería', unit: 'ud', unitPrice: 2300, defaultQuantity: 1, range: '1.900–3.200 €/equipo', source: 'market', sourceNote: 'Suministro del equipo; confirma batería compatible, fases y potencia de respaldo.' },
+    { id: 'inverter-hybrid-15', group: 'inversores', category: 'Material', description: 'Inversor híbrido trifásico 15 kW preparado para batería', unit: 'ud', unitPrice: 3300, defaultQuantity: 1, range: '2.800–4.500 €/equipo', source: 'market', sourceNote: 'Suministro del equipo; valida compatibilidad de almacenamiento y dimensionado trifásico.' },
+    { id: 'inverter-hybrid-20', group: 'inversores', category: 'Material', description: 'Inversor híbrido trifásico 20 kW preparado para batería', unit: 'ud', unitPrice: 4200, defaultQuantity: 1, range: '3.600–5.800 €/equipo', source: 'market', sourceNote: 'Suministro del equipo; valida compatibilidad de almacenamiento y dimensionado trifásico.' },
+    { id: 'microinverter', group: 'inversores', category: 'Material', description: 'Microinversor de 1–2 módulos con monitorización', unit: 'ud', unitPrice: 175, defaultQuantity: 12, panelWp: 450, quantityRule: 'panels', range: '140–230 €/unidad', source: 'market', sourceNote: 'Unidades necesarias según diseño y módulos admitidos; no combinar sin revisar el esquema eléctrico.' },
+    { id: 'power-optimizer', group: 'inversores', category: 'Material', description: 'Optimizador de potencia por módulo para tejado con sombras', unit: 'ud', unitPrice: 70, defaultQuantity: 1, panelWp: 450, quantityRule: 'panels', range: '55–100 €/módulo', source: 'market', sourceNote: 'Instalar solo si el diseño y el fabricante del inversor lo requieren.' },
+    { id: 'battery-supply-5kwh', group: 'baterias', category: 'Material', description: 'Batería LFP modular 5 kWh · suministro sin instalación', unit: 'ud', unitPrice: 2300, defaultQuantity: 1, range: '1.800–3.000 €/módulo', source: 'market', sourceNote: 'Suministro orientativo; confirma capacidad útil, BMS, inversor compatible y garantía.' },
+    { id: 'battery-supply-10kwh', group: 'baterias', category: 'Material', description: 'Sistema de baterías LFP 10 kWh · suministro sin instalación', unit: 'ud', unitPrice: 4300, defaultQuantity: 1, range: '3.500–5.500 €/sistema', source: 'market', sourceNote: 'Suministro orientativo; confirma capacidad útil, BMS, inversor compatible y garantía.' },
+    { id: 'battery-rack', group: 'baterias', category: 'Material', description: 'Armario, base o bastidor para batería modular', unit: 'ud', unitPrice: 320, defaultQuantity: 1, range: '200–500 €/unidad', source: 'market', sourceNote: 'Añadir únicamente si el fabricante no incluye la base o el armario.' },
+    { id: 'battery-retrofit-labor', group: 'baterias', category: 'Mano de obra', description: 'Montaje, cableado, parametrización y pruebas de batería', unit: 'servicio', unitPrice: 450, defaultQuantity: 1, range: '300–700 €/servicio', source: 'prices', sourceNote: 'No incluye el suministro de batería ni cambios de inversor.' },
+    { id: 'structure-sheet', group: 'estructuras', category: 'Material', description: 'Anclajes y estructura para panel sobre chapa sándwich / cubierta metálica', unit: 'ud', unitPrice: 45, defaultQuantity: 12, panelWp: 450, quantityRule: 'panels', range: '400–650 € para 12 paneles', source: 'market', sourceNote: 'Por módulo; comprueba espesor, greca, puntos de anclaje y estanqueidad.' },
+    { id: 'structure-slate', group: 'estructuras', category: 'Material', description: 'Anclajes y estructura para cubierta de pizarra o teja especial', unit: 'ud', unitPrice: 65, defaultQuantity: 12, panelWp: 450, quantityRule: 'panels', range: '550–900 € para 12 paneles', source: 'market', sourceNote: 'Por módulo; el anclaje depende del soporte y puede requerir reposición o sellado.' },
+    { id: 'structure-carport', group: 'estructuras', category: 'Material', description: 'Estructura tipo pérgola / marquesina fotovoltaica · referencia por módulo', unit: 'ud', unitPrice: 110, defaultQuantity: 12, panelWp: 450, quantityRule: 'panels', range: '90–180 €/módulo, sin obra civil', source: 'market', sourceNote: 'No incluye cimentación, canalización ni cálculo estructural de la marquesina.' },
+    { id: 'roof-repair', group: 'estructuras', category: 'Otros', description: 'Reparación menor de tejas, sellado de anclajes y pasos de cable', unit: 'servicio', unitPrice: 180, defaultQuantity: 1, range: '100–350 €/intervención', source: 'prices', sourceNote: 'Estimación de partida; valorar sobre cubierta después de la visita técnica.' },
+    { id: 'dc-cable-4mm', group: 'electricos', category: 'Material', description: 'Cable solar DC H1Z2Z2-K 4 mm², resistente UV', unit: 'm', unitPrice: 2.6, defaultQuantity: 40, range: '2–4 €/m orientativo', source: 'market', sourceNote: 'Longitud estimada: mide el recorrido real y verifica caída de tensión y normativa.' },
+    { id: 'dc-cable-6mm', group: 'electricos', category: 'Material', description: 'Cable solar DC H1Z2Z2-K 6 mm², resistente UV', unit: 'm', unitPrice: 3.2, defaultQuantity: 50, range: '2,50–5 €/m orientativo', source: 'market', sourceNote: 'Longitud estimada: mide el recorrido real y verifica caída de tensión y normativa.' },
+    { id: 'ac-cable-6mm', group: 'electricos', category: 'Material', description: 'Cableado AC 6 mm² para conexión de inversor monofásico', unit: 'm', unitPrice: 4, defaultQuantity: 15, range: '3–6 €/m orientativo', source: 'market', sourceNote: 'La sección y longitud deben calcularse según intensidad, distancia y REBT.' },
+    { id: 'ac-cable-10mm', group: 'electricos', category: 'Material', description: 'Cableado AC 10 mm² para conexión de inversor', unit: 'm', unitPrice: 6, defaultQuantity: 15, range: '4–8 €/m orientativo', source: 'market', sourceNote: 'La sección y longitud deben calcularse según intensidad, distancia y REBT.' },
+    { id: 'conduit-25mm', group: 'electricos', category: 'Material', description: 'Tubo / canalización de protección para cableado solar', unit: 'm', unitPrice: 2.8, defaultQuantity: 20, range: '2–5 €/m orientativo', source: 'market', sourceNote: 'La cantidad depende del recorrido, exterior/interior, diámetro y resistencia UV.' },
+    { id: 'mc4-pair', group: 'electricos', category: 'Material', description: 'Juego de conectores fotovoltaicos compatibles tipo MC4', unit: 'par', unitPrice: 8, defaultQuantity: 2, range: '6–14 €/par orientativo', source: 'market', sourceNote: 'Verifica compatibilidad del conector con el cable y el fabricante del módulo.' },
+    { id: 'dc-protection', group: 'electricos', category: 'Material', description: 'Cuadro de protección DC: seccionador, fusibles y sobretensiones tipo II', unit: 'ud', unitPrice: 190, defaultQuantity: 1, range: '130–300 €/cuadro', source: 'market', sourceNote: 'Dimensionar número de strings, corriente y coordinación de protecciones.' },
+    { id: 'ac-protection-1ph', group: 'electricos', category: 'Material', description: 'Cuadro de protección AC monofásico para inversor fotovoltaico', unit: 'ud', unitPrice: 200, defaultQuantity: 1, range: '140–320 €/cuadro', source: 'market', sourceNote: 'Incluye protecciones de referencia; definir diferencial, magnetotérmico y sobretensiones según proyecto.' },
+    { id: 'protection-kit-1ph', group: 'electricos', category: 'Material', description: 'Conjunto de protecciones DC + AC para instalación monofásica', unit: 'ud', unitPrice: 370, defaultQuantity: 1, featured: true, range: '280–600 €/conjunto', source: 'market', sourceNote: 'Partida combinada para el generador de presupuesto; no añadir también los cuadros DC y AC por separado.' },
+    { id: 'protection-kit-3ph', group: 'electricos', category: 'Material', description: 'Conjunto de protecciones DC + AC para instalación trifásica', unit: 'ud', unitPrice: 520, defaultQuantity: 1, range: '400–850 €/conjunto', source: 'market', sourceNote: 'Partida combinada; dimensionar por corriente, número de strings y normativa. No añadir los cuadros por separado.' },
+    { id: 'combiner-box', group: 'electricos', category: 'Material', description: 'Caja combinadora DC para dos o más strings', unit: 'ud', unitPrice: 260, defaultQuantity: 1, range: '180–450 €/unidad', source: 'market', sourceNote: 'Añadir cuando el diseño requiera combinar strings; no es necesaria en todas las instalaciones.' },
+    { id: 'grounding-kit', group: 'electricos', category: 'Material', description: 'Puesta a tierra, conductor y unión equipotencial de estructura FV', unit: 'servicio', unitPrice: 110, defaultQuantity: 1, range: '70–180 €/instalación', source: 'market', sourceNote: 'Comprobar continuidad, sección y conexión según diseño y REBT.' },
+    { id: 'cable-set-kwp', group: 'electricos', category: 'Material', description: 'Lote proporcional de cable FV, conectores, canalización y pequeño material', unit: 'kWp', unitPrice: 60, defaultQuantity: 5, quantityRule: 'kwp', featured: true, range: '45–95 €/kWp orientativo', source: 'market', sourceNote: 'Cantidad y sección estimadas por potencia; revisar recorrido real. No incluye protecciones.' },
+    { id: 'smart-meter', group: 'electricos', category: 'Material', description: 'Medidor inteligente / vatímetro para control de excedentes', unit: 'ud', unitPrice: 160, defaultQuantity: 1, range: '100–280 €/equipo', source: 'market', sourceNote: 'Comprueba compatibilidad y protocolo de comunicación con el inversor seleccionado.' },
+    { id: 'wifi-dongle', group: 'electricos', category: 'Material', description: 'Módulo Wi-Fi / datalogger para monitorización del inversor', unit: 'ud', unitPrice: 70, defaultQuantity: 1, range: '40–140 €/unidad', source: 'market', sourceNote: 'Puede venir incluido con el inversor; confirmar antes de presupuestarlo.' },
+    { id: 'eps-backup-board', group: 'electricos', category: 'Material', description: 'Cuadro de respaldo EPS para circuitos prioritarios', unit: 'ud', unitPrice: 480, defaultQuantity: 1, range: '350–850 €/cuadro', source: 'market', sourceNote: 'Solo para inversores con salida de respaldo compatible; no equivale a respaldar toda la vivienda.' },
+    { id: 'installer-hour', group: 'montaje', category: 'Mano de obra', description: 'Instalador fotovoltaico · coste horario base de referencia', unit: 'horas', unitPrice: 26, defaultQuantity: 8, range: '≈26 €/hora en referencia PREOC consultada', source: 'preoc', sourceNote: 'Coste directo de referencia, no tarifa de venta; añadir estructura y margen de empresa.' },
+    { id: 'commissioning', group: 'montaje', category: 'Mano de obra', description: 'Configuración de inversor, monitorización, pruebas y puesta en marcha', unit: 'servicio', unitPrice: 150, defaultQuantity: 1, range: '100–250 €/servicio', source: 'prices', sourceNote: 'No duplicar si ya está incluido en el precio de montaje por kWp o en un pack llave en mano.' },
+    { id: 'site-survey', group: 'montaje', category: 'Desplazamiento', description: 'Visita técnica, toma de medidas y comprobación de cubierta', unit: 'visita', unitPrice: 85, defaultQuantity: 1, range: '60–150 €/visita', source: 'travel', sourceNote: 'Separa el desplazamiento si tu tarifa lo cobra aparte.' },
+    { id: 'material-hoist', group: 'montaje', category: 'Otros', description: 'Elevación de paneles y material a cubierta con grúa o montacargas', unit: 'servicio', unitPrice: 450, defaultQuantity: 1, range: '300–700 €/servicio', source: 'prices', sourceNote: 'Añadir si el acceso no permite subir el material de forma segura por medios propios.' },
+    { id: 'safety-line', group: 'montaje', category: 'Otros', description: 'Línea de vida temporal, protección colectiva y seguridad en cubierta', unit: 'jornada', unitPrice: 220, defaultQuantity: 1, range: '150–400 €/jornada', source: 'prices', sourceNote: 'Valorar según altura, riesgo, acceso y plan de seguridad de la obra.' },
+    { id: 'technical-memory', group: 'gestion', category: 'Otros', description: 'Memoria técnica de diseño para autoconsumo residencial', unit: 'servicio', unitPrice: 180, defaultQuantity: 1, range: '150–300 €/servicio', source: 'market', sourceNote: 'Comprobar la documentación exigible por potencia, configuración y administración competente.' },
+    { id: 'cie-certificate', group: 'gestion', category: 'Otros', description: 'Certificado de instalación eléctrica (CIE / boletín)', unit: 'servicio', unitPrice: 140, defaultQuantity: 1, range: '100–220 €/servicio', source: 'market', sourceNote: 'Precio orientativo; confirmar si está incluido en legalización o memoria técnica.' },
+    { id: 'industry-registration', group: 'gestion', category: 'Otros', description: 'Registro de autoconsumo y documentación para distribuidora / industria', unit: 'servicio', unitPrice: 160, defaultQuantity: 1, range: '100–250 €/tramitación', source: 'market', sourceNote: 'Trámite orientativo; tasas o gestiones municipales pueden ir aparte.' },
+    { id: 'technical-project-10kw', group: 'gestion', category: 'Otros', description: 'Proyecto técnico, dirección y legalización para instalación de mayor potencia', unit: 'servicio', unitPrice: 850, defaultQuantity: 1, range: '600–1.500 €/servicio', source: 'market', sourceNote: 'La exigencia depende de potencia, modalidad, ubicación y normativa aplicable; confirmar con técnico competente.' },
+    { id: 'grant-paperwork', group: 'gestion', category: 'Otros', description: 'Preparación y seguimiento de documentación para ayudas o bonificaciones', unit: 'servicio', unitPrice: 220, defaultQuantity: 1, range: '150–400 €/expediente', source: 'prices', sourceNote: 'No incluye tasas, certificados externos ni garantiza la concesión de la ayuda.' },
+    { id: 'travel-km', group: 'gestion', category: 'Desplazamiento', description: 'Kilometraje de desplazamiento técnico dentro de la isla', unit: 'km', unitPrice: 0.45, defaultQuantity: 30, range: '0,35–0,65 €/km orientativo', source: 'travel', sourceNote: 'Ajusta kilómetros de ida y vuelta y política de desplazamiento de tu empresa.' },
+    { id: 'island-freight', group: 'gestion', category: 'Desplazamiento', description: 'Transporte de material / logística interinsular', unit: 'servicio', unitPrice: 180, defaultQuantity: 1, range: 'Según isla, peso y operador', source: 'travel', sourceNote: 'Precio inicial editable; sustituir por el coste real del porte, ferry, envío y manipulación.' },
+    { id: 'ev-charger-7kw', group: 'equipos', category: 'Material', description: 'Cargador de vehículo eléctrico monofásico 7,4 kW con control dinámico', unit: 'ud', unitPrice: 750, defaultQuantity: 1, range: '550–1.100 €/equipo', source: 'market', sourceNote: 'Suministro orientativo; revisar longitud de línea, protecciones y compatibilidad con fotovoltaica.' },
+    { id: 'ev-charger-install', group: 'montaje', category: 'Mano de obra', description: 'Instalación y configuración de cargador de vehículo eléctrico', unit: 'servicio', unitPrice: 450, defaultQuantity: 1, range: '300–800 €/servicio', source: 'prices', sourceNote: 'No incluye canalización larga, obra civil ni aumento de potencia contratada.' },
+    { id: 'energy-manager', group: 'equipos', category: 'Material', description: 'Gestor energético / limitador dinámico de potencia para autoconsumo', unit: 'ud', unitPrice: 250, defaultQuantity: 1, range: '150–450 €/equipo', source: 'market', sourceNote: 'Comprueba compatibilidad con inversor, cargador, contador y cargas gestionables.' },
+    { id: 'maintenance-visit', group: 'mantenimiento', category: 'Mano de obra', description: 'Revisión preventiva anual de instalación fotovoltaica', unit: 'servicio', unitPrice: 190, defaultQuantity: 1, range: '150–300 €/visita', source: 'prices', sourceNote: 'Definir inspecciones, reapriete, medidas eléctricas y exclusiones del servicio.' },
+    { id: 'panel-cleaning', group: 'mantenimiento', category: 'Mano de obra', description: 'Limpieza técnica de módulo fotovoltaico', unit: 'ud', unitPrice: 8, defaultQuantity: 12, panelWp: 450, quantityRule: 'panels', range: '6–12 €/módulo', source: 'prices', sourceNote: 'Valorar acceso, altura, suciedad, seguridad y disponibilidad de agua adecuada.' },
+    { id: 'inverter-diagnostic', group: 'mantenimiento', category: 'Mano de obra', description: 'Diagnóstico de avería, revisión de alarmas y pruebas de inversor', unit: 'servicio', unitPrice: 120, defaultQuantity: 1, range: '80–200 €/visita', source: 'prices', sourceNote: 'No incluye repuestos, desplazamiento extraordinario ni reparación de otros equipos.' },
+    { id: 'battery-health-check', group: 'mantenimiento', category: 'Mano de obra', description: 'Revisión de batería, BMS, comunicaciones y capacidad disponible', unit: 'servicio', unitPrice: 95, defaultQuantity: 1, range: '70–180 €/revisión', source: 'prices', sourceNote: 'Servicio condicionado a herramientas y datos disponibles del fabricante.' }
   ];
   const ISLAND_CENTERS = {
     'Gran Canaria': [27.96, -15.57], Tenerife: [28.27, -16.64], Lanzarote: [29.03, -13.64], Fuerteventura: [28.36, -14.05],
@@ -102,12 +165,13 @@ notify pgrst, 'reload schema';`;
   const monthFmt = (v) => v ? new Date(v + '-01T12:00:00').toLocaleDateString('es-ES', { month: 'long', year: 'numeric' }) : '';
   const optionHtml = (items, selected, emptyLabel) => '<option value="">' + esc(emptyLabel || 'Sin asignar') + '</option>' + items.map(x => '<option value="' + esc(x.id) + '"' + (String(x.id) === String(selected || '') ? ' selected' : '') + '>' + esc(x.name || x.title || 'Sin nombre') + '</option>').join('');
   const clone = (v) => JSON.parse(JSON.stringify(v));
-  const emptyData = () => ({ version: 1, company: { name: '', taxId: '', phone: '', email: '', address: '', currency: 'EUR', taxName: 'IGIC', taxRate: 7, owner: '' }, leads: [], clients: [], works: [], tasks: [], quotes: [], invoices: [], payments: [], expenses: [], events: [], documents: [], team: [], _meta: { deleted: {} } });
+  const emptyData = () => ({ version: 1, company: { name: '', taxId: '', phone: '', email: '', address: '', currency: 'EUR', taxName: 'IGIC', taxRate: 7, owner: '', quoteCatalog: [] }, leads: [], clients: [], works: [], tasks: [], quotes: [], invoices: [], payments: [], expenses: [], events: [], documents: [], team: [], _meta: { deleted: {} } });
 
   function normalize(input) {
     const source = input && typeof input === 'object' ? input : {};
     const out = emptyData();
     Object.assign(out.company, source.company && typeof source.company === 'object' ? source.company : {});
+    out.company.quoteCatalog = Array.isArray(out.company.quoteCatalog) ? out.company.quoteCatalog.filter(item => item && item.description).map((item, index) => Object.assign({ id: 'personal-' + (index + 1), group: 'personal', personal: true, category: 'Otros', unit: 'ud', unitPrice: 0, defaultQuantity: 1, source: 'custom', sourceNote: 'Tarifa guardada por la empresa.' }, item)) : [];
     // Migrate the old mainland IVA default to the general Canary Islands IGIC rate.
     if (!source.company || !source.company.taxName) {
       out.company.taxName = 'IGIC';
@@ -1581,63 +1645,146 @@ notify pgrst, 'reload schema';`;
       '<div class="field"><label for="' + lineId + '-unit">Unidad</label><input id="' + lineId + '-unit" data-quote-field="unit" type="text" data-auto-unit="' + autoUnit + '" value="' + esc(unit) + '" placeholder="horas, km, ud"></div>' +
       '<div class="field"><label for="' + lineId + '-price">Precio por unidad (€)</label><input id="' + lineId + '-price" data-quote-field="unitPrice" type="number" min="0" step="0.01" value="' + esc(item.unitPrice == null ? '' : item.unitPrice) + '" placeholder="0,00"></div>' +
       '<div class="quote-line-total-wrap"><span>Importe de la partida</span><strong data-quote-line-total>0,00 €</strong></div>' +
-      '</div><div class="quote-line-actions"><span class="muted small">Cantidad × precio por unidad</span>' + (priceReference ? '<small class="quote-line-reference">Referencia ' + esc(priceRange ? priceRange + ' · ' : '') + (priceReferenceUrl ? '<a href="' + esc(safeHref(priceReferenceUrl)) + '" target="_blank" rel="noopener">' + esc(priceReference) + ' ↗</a>' : esc(priceReference)) + (priceReferenceNote ? ' · ' + esc(priceReferenceNote) : '') + '</small>' : '') + '<button type="button" class="tiny-btn danger" data-action="remove-quote-line" aria-label="Quitar esta partida">Quitar partida</button></div><input type="hidden" data-quote-field="priceReference" value="' + esc(priceReference) + '"><input type="hidden" data-quote-field="priceReferenceUrl" value="' + esc(priceReferenceUrl) + '"><input type="hidden" data-quote-field="priceRange" value="' + esc(priceRange) + '"><input type="hidden" data-quote-field="priceReferenceNote" value="' + esc(priceReferenceNote) + '"></article>';
+      '</div><div class="quote-line-actions"><span class="muted small">Cantidad × precio por unidad</span>' + (priceReference ? '<small class="quote-line-reference">Referencia ' + esc(priceRange ? priceRange + ' · ' : '') + (priceReferenceUrl ? '<a href="' + esc(safeHref(priceReferenceUrl)) + '" target="_blank" rel="noopener">' + esc(priceReference) + ' ↗</a>' : esc(priceReference)) + (priceReferenceNote ? ' · ' + esc(priceReferenceNote) : '') + '</small>' : '') + '<button type="button" class="tiny-btn" data-action="save-quote-line-to-catalog">Guardar en mi catálogo</button><button type="button" class="tiny-btn danger" data-action="remove-quote-line" aria-label="Quitar esta partida">Quitar partida</button></div><input type="hidden" data-quote-field="priceReference" value="' + esc(priceReference) + '"><input type="hidden" data-quote-field="priceReferenceUrl" value="' + esc(priceReferenceUrl) + '"><input type="hidden" data-quote-field="priceRange" value="' + esc(priceRange) + '"><input type="hidden" data-quote-field="priceReferenceNote" value="' + esc(priceReferenceNote) + '"></article>';
   }
   function quoteItemsForForm(item) {
     if (Array.isArray(item.items) && item.items.length) return clone(item.items);
     if (num(item.amount) > 0) return [{ category: 'Otros', description: item.title || 'Importe anterior sin desglose', quantity: 1, unit: 'servicio', unitPrice: num(item.amount) }];
     return [{ category: 'Mano de obra', description: '', quantity: '', unit: 'horas', unitPrice: '' }];
   }
-  function quoteEditorMarkup(items, includeCatalog) {
-    return '<section class="quote-editor"><div class="card-head"><div><h3>Desglose del presupuesto</h3><p>Horas, desplazamiento, materiales, montaje e IGIC, con partidas listas para usar.</p></div><button type="button" class="btn btn-sm" data-action="add-quote-line">＋ Añadir partida manual</button></div>' + (includeCatalog ? quoteCatalogMarkup() : '') + '<div class="quote-line-list" data-quote-line-list>' + (items || []).map(quoteLineMarkup).join('') + '</div><div class="quote-summary"><div><span>Base imponible</span><strong data-quote-base>0,00 €</strong></div><div><span>IGIC (<b data-quote-tax-rate>7</b> %)</span><strong data-quote-tax>0,00 €</strong></div><div class="quote-summary-total"><span>Total</span><strong data-quote-total>0,00 €</strong></div></div><p class="modal-note">' + (includeCatalog ? 'Precios orientativos consultados en noviembre de 2026; cada precio se puede editar. Los packs llave en mano ya incluyen partidas del sistema: no los sumes junto al desglose de los mismos trabajos. En los presupuestos antiguos, el importe actual se conserva como una partida editable.' : 'Importes calculados automáticamente a partir del desglose.') + '</p></section>';
+  function quoteEditorMarkup(items, includeCatalog, workId) {
+    return '<section class="quote-editor"><div class="card-head"><div><h3>Desglose del presupuesto</h3><p>Horas, desplazamiento, materiales, montaje e IGIC, con partidas listas para usar.</p></div><button type="button" class="btn btn-sm" data-action="add-quote-line">＋ Añadir partida manual</button></div>' + (includeCatalog ? quoteCatalogMarkup(workId) : '') + '<div class="quote-line-list" data-quote-line-list>' + (items || []).map(quoteLineMarkup).join('') + '</div><div class="quote-summary"><div><span>Base imponible</span><strong data-quote-base>0,00 €</strong></div><div><span>IGIC (<b data-quote-tax-rate>7</b> %)</span><strong data-quote-tax>0,00 €</strong></div><div class="quote-summary-total"><span>Total</span><strong data-quote-total>0,00 €</strong></div></div><p class="modal-note">' + (includeCatalog ? 'Precios de referencia 2026, editables y ajustables a tu tarifa. El desglose sugerido calcula cantidades iniciales a partir de los kWp y número de paneles; revisa cubierta, recorridos y alcance antes de enviar. Los packs llave en mano ya incluyen partidas: no los combines con los mismos trabajos desglosados.' : 'Importes calculados automáticamente a partir del desglose.') + '</p></section>';
   }
-  function quoteCatalogMarkup() {
-    return '<section class="quote-catalog" aria-label="Catálogo de partidas fotovoltaicas"><div class="quote-catalog-head"><div><p class="eyebrow">CATÁLOGO FOTOVOLTAICO</p><strong>Selecciona una partida y añádela al presupuesto</strong><p>Referencias para Canarias y precios de mercado. Ajusta marca, cubierta, potencia y tarifa de tu empresa.</p></div><span class="quote-catalog-count">' + SOLAR_QUOTE_CATALOG.length + ' partidas</span></div><div class="quote-catalog-tools"><div class="field"><label for="quote-catalog-search">Buscar en el catálogo</label><input id="quote-catalog-search" type="search" data-catalog-search placeholder="Ej.: panel, inversor, batería, horas…" autocomplete="off"></div><div class="field"><label for="quote-catalog-group">Tipo de partida</label><select id="quote-catalog-group" data-catalog-group><option value="frecuentes">Más utilizadas</option><option value="kits">Instalaciones completas</option><option value="materiales">Equipos y materiales</option><option value="montaje">Montaje y mano de obra</option><option value="gestion">Desplazamientos y trámites</option><option value="todas">Ver todo el catálogo</option></select></div></div><p class="quote-catalog-warning" data-catalog-warning hidden>Este pack llave en mano incluye el suministro y los trabajos habituales. No lo combines con esas mismas partidas individuales.</p><div class="quote-catalog-results" data-catalog-results></div><div class="quote-catalog-footer">Fuentes: <a href="' + esc(SOLAR_PRICE_SOURCES.canary.url) + '" target="_blank" rel="noopener">tarifas residenciales publicadas en Canarias</a>, <a href="' + esc(SOLAR_PRICE_SOURCES.market.url) + '" target="_blank" rel="noopener">desglose de mercado FV 2026</a> y <a href="' + esc(SOLAR_PRICE_SOURCES.cype.url) + '" target="_blank" rel="noopener">CYPE</a>. Precios indicativos; la aplicación suma el IGIC configurado, así que comprueba si el precio de origen incluye impuestos. El catálogo funciona también sin conexión.</div></section>';
+  function quotePowerForWork(workId) {
+    const work = data.works.find(row => row.id === workId);
+    const study = work && work.solarStudy || {};
+    const config = study.config || (study.result && study.result.config) || {};
+    return num(config.peakPower);
+  }
+  function quoteCatalogMarkup(workId) {
+    const initialPower = quotePowerForWork(workId) || 5;
+    const personalCount = (data.company.quoteCatalog || []).length;
+    return '<section class="quote-catalog" aria-label="Catálogo fotovoltaico de partidas"><div class="quote-catalog-head"><div><p class="eyebrow">CATÁLOGO FOTOVOLTAICO</p><strong>Partidas preparadas para tus presupuestos</strong><p>Selecciona productos sueltos o genera un desglose inicial desde los kWp de PVGIS. Tus partidas guardadas quedan en tu cuenta.</p></div><span class="quote-catalog-count">' + (SOLAR_QUOTE_CATALOG.length + personalCount) + ' partidas</span></div>' +
+      '<div class="solar-bundle-tools"><div><p class="eyebrow">GENERADOR DE DESGLOSE</p><strong>Prepara un presupuesto solar en un clic</strong><p>Usa la potencia del estudio PVGIS asociado a la obra. Si no hay estudio, parte de 5 kWp. Las cantidades se pueden cambiar.</p></div><div class="solar-bundle-fields"><div class="field"><label>Potencia FV (kWp)</label><input type="number" min="1" max="20" step="0.1" value="' + esc(initialPower) + '" data-solar-bundle-power></div><div class="field"><label>Inversor</label><select data-solar-bundle-inverter><option value="hybrid" selected>Híbrido (preparado para batería)</option><option value="string">String (sin batería)</option></select></div><div class="field"><label>Cubierta</label><select data-solar-bundle-roof><option value="tile" selected>Teja</option><option value="flat">Plana lastrada</option><option value="sheet">Chapa / sándwich</option><option value="slate">Pizarra / teja especial</option><option value="carport">Pérgola / marquesina</option></select></div><div class="field"><label>Batería</label><select data-solar-bundle-battery><option value="0" selected>Sin batería</option><option value="5">5 kWh</option><option value="10">10 kWh</option><option value="15">15 kWh</option></select></div></div><button type="button" class="btn btn-primary btn-sm" data-action="add-solar-quote-bundle">＋ Añadir desglose FV sugerido</button></div>' +
+      '<div class="quote-catalog-tools"><div class="field"><label for="quote-catalog-search">Buscar partidas</label><input id="quote-catalog-search" type="search" data-catalog-search placeholder="Panel, inversor, batería, cable, hora, IGIC…" autocomplete="off"></div><div class="field"><label for="quote-catalog-group">Ver por grupo</label><select id="quote-catalog-group" data-catalog-group><option value="frecuentes">Más utilizadas</option><option value="kits">Kits llave en mano</option><option value="modulos">Paneles</option><option value="inversores">Inversores y optimizadores</option><option value="baterias">Baterías y almacenamiento</option><option value="estructuras">Estructuras y cubiertas</option><option value="electricos">Cableado, cuadros y protecciones</option><option value="equipos">Cargadores y gestión energética</option><option value="montaje">Mano de obra y medios auxiliares</option><option value="gestion">Desplazamientos y trámites</option><option value="mantenimiento">Mantenimiento y postventa</option><option value="personal">Mis partidas guardadas (' + personalCount + ')</option><option value="todas">Todo el catálogo</option></select></div></div><p class="quote-catalog-warning" data-catalog-warning hidden>Este pack llave en mano incluye el suministro y los trabajos habituales. No lo combines con esas mismas partidas desglosadas.</p><div class="quote-catalog-results" data-catalog-results></div><div class="quote-catalog-footer">Referencias: <a href="' + esc(SOLAR_PRICE_SOURCES.canary.url) + '" target="_blank" rel="noopener">precios residenciales publicados en Canarias</a>, <a href="' + esc(SOLAR_PRICE_SOURCES.market.url) + '" target="_blank" rel="noopener">desglose fotovoltaico 2026</a>, <a href="' + esc(SOLAR_PRICE_SOURCES.preoc.url) + '" target="_blank" rel="noopener">PREOC 2026</a> y <a href="' + esc(SOLAR_PRICE_SOURCES.cype.url) + '" target="_blank" rel="noopener">CYPE</a>. Precios editables de referencia; comprueba stock, envío interinsular, alcance e IGIC antes de enviar. Las cantidades sugeridas no sustituyen el replanteo ni el cálculo eléctrico.</div></section>';
+  }
+  function quoteCatalogItems() {
+    return SOLAR_QUOTE_CATALOG.concat((data.company.quoteCatalog || []).map(item => Object.assign({}, item, { group: 'personal', personal: true, source: 'custom' })));
+  }
+  function customCatalogPriceFor(item) {
+    if (item && item.personal) return item;
+    return (data.company.quoteCatalog || []).find(saved => normalizeSearchText(saved.description) === normalizeSearchText(item.description) && normalizeSearchText(saved.unit) === normalizeSearchText(item.unit)) || null;
+  }
+  function catalogEffectivePrice(item) {
+    const saved = customCatalogPriceFor(item);
+    return saved ? num(saved.unitPrice) : num(item.unitPrice);
   }
   function quoteCatalogCardMarkup(item) {
     const source = SOLAR_PRICE_SOURCES[item.source] || {};
-    return '<article class="quote-catalog-card"><div class="quote-catalog-card-copy"><span class="quote-catalog-type">' + esc(item.category) + '</span><strong>' + esc(item.description) + '</strong><small>' + esc(item.range || '') + '</small></div><div class="quote-catalog-card-bottom"><div><strong>' + esc(money(item.unitPrice)) + '</strong><span>por ' + esc(item.unit) + '</span></div><button type="button" class="btn btn-sm btn-primary" data-action="add-catalog-quote-line" data-catalog-id="' + esc(item.id) + '">Añadir</button></div><small class="quote-catalog-source">' + (source.url ? '<a href="' + esc(source.url) + '" target="_blank" rel="noopener">' + esc(source.label) + ' ↗</a>' : esc(source.label || 'Referencia de precios')) + (item.sourceNote ? ' · ' + esc(item.sourceNote) : '') + '</small></article>';
+    const savedPrice = customCatalogPriceFor(item);
+    const sourceLabel = savedPrice ? 'Tu tarifa guardada aplicada' : source.label || 'Precio de referencia';
+    return '<article class="quote-catalog-card"><div class="quote-catalog-card-copy"><span class="quote-catalog-type">' + esc(item.category) + '</span><strong>' + esc(item.description) + '</strong><small>' + esc(item.range || '') + '</small></div><div class="quote-catalog-card-bottom"><div><strong>' + esc(money(catalogEffectivePrice(item))) + '</strong><span>por ' + esc(item.unit) + '</span></div><button type="button" class="btn btn-sm btn-primary" data-action="add-catalog-quote-line" data-catalog-id="' + esc(item.id) + '">Añadir</button></div><small class="quote-catalog-source">' + (savedPrice ? esc(sourceLabel) + (source.url ? ' · referencia: <a href="' + esc(source.url) + '" target="_blank" rel="noopener">' + esc(source.label || 'precio de referencia') + ' ↗</a>' : '') : source.url ? '<a href="' + esc(source.url) + '" target="_blank" rel="noopener">' + esc(source.label) + ' ↗</a>' : esc(sourceLabel)) + (item.sourceNote ? ' · ' + esc(item.sourceNote) : '') + '</small>' + (item.personal ? '<button type="button" class="tiny-btn danger" data-action="remove-saved-quote-catalog-item" data-catalog-id="' + esc(item.id) + '">Quitar de mi catálogo</button>' : '') + '</article>';
   }
   function renderQuoteCatalog(form) {
     const results = $('[data-catalog-results]', form);
     if (!results) return;
     const group = ($('[data-catalog-group]', form) || {}).value || 'frecuentes';
     const search = normalizeSearchText(($('[data-catalog-search]', form) || {}).value || '');
-    const items = SOLAR_QUOTE_CATALOG.filter(item => {
-      const inGroup = group === 'todas' || item.group === group || (group === 'frecuentes' && ['panel-tier1', 'inverter-hybrid', 'battery-5kwh', 'structure-tile', 'wiring-protection', 'mounting-labor', 'legalization', 'travel-visit'].includes(item.id));
+    const featuredIds = ['kit-3kwp', 'kit-5kwp', 'kit-5kwp-battery', 'panel-tier1', 'inverter-hybrid', 'battery-5kwh', 'structure-tile', 'protection-kit-1ph', 'cable-set-kwp', 'smart-meter', 'wiring-protection', 'mounting-labor', 'legalization', 'travel-visit'];
+    const items = quoteCatalogItems().filter(item => {
+      const inGroup = group === 'todas' || item.group === group || (group === 'frecuentes' && (item.featured || featuredIds.includes(item.id))) || (group === 'personal' && item.personal);
       const haystack = normalizeSearchText([item.description, item.category, item.unit, item.range, item.sourceNote].join(' '));
       return inGroup && (!search || haystack.includes(search));
     });
-    results.innerHTML = items.length ? items.map(quoteCatalogCardMarkup).join('') : '<p class="quote-catalog-empty">No hay partidas con esa búsqueda. Prueba otra palabra o añade una partida manual.</p>';
+    results.innerHTML = items.length ? items.map(quoteCatalogCardMarkup).join('') : '<p class="quote-catalog-empty">No hay partidas en este grupo todavía. Añade una partida a mano y pulsa «Guardar en mi catálogo» para reutilizarla en próximos presupuestos.</p>';
     const warning = $('[data-catalog-warning]', form);
     if (warning) warning.hidden = group !== 'kits' && !items.some(item => item.group === 'kits');
   }
-  function suggestedCatalogQuantity(item, form) {
-    if (item.id === 'panel-tier1' || item.id === 'structure-tile' || item.id === 'structure-flat') {
-      const workId = ($('[name="workId"]', form) || {}).value;
-      const work = data.works.find(row => row.id === workId);
-      const config = work && work.solarStudy && work.solarStudy.config;
-      if (config && num(config.peakPower) > 0) return Math.max(1, Math.ceil(num(config.peakPower) * 1000 / 425));
-    }
-    if (item.id === 'mounting-labor' || item.id === 'wiring-protection') {
-      const workId = ($('[name="workId"]', form) || {}).value;
-      const work = data.works.find(row => row.id === workId);
-      const config = work && work.solarStudy && work.solarStudy.config;
-      if (config && num(config.peakPower) > 0) return num(config.peakPower);
-    }
+  function suggestedCatalogQuantity(item, form, powerOverride) {
+    const workId = ($('[name="workId"]', form) || {}).value;
+    const power = num(powerOverride) || quotePowerForWork(workId);
+    if (item.quantityRule === 'panels' && power > 0) return Math.max(1, Math.ceil(power * 1000 / (num(item.panelWp) || 450)));
+    if (item.quantityRule === 'kwp' && power > 0) return Math.round(power * 100) / 100;
     return item.defaultQuantity || 1;
+  }
+  function catalogLineForItem(item, form, quantity) {
+    const source = SOLAR_PRICE_SOURCES[item.source] || {};
+    const saved = customCatalogPriceFor(item);
+    const suggestedQuantity = item.quantityRule ? suggestedCatalogQuantity(item, form) : saved && saved.defaultQuantity || item.defaultQuantity || 1;
+    return { category: item.category || 'Otros', description: item.description, quantity: quantity == null ? suggestedQuantity : quantity, unit: item.unit || 'ud', unitPrice: catalogEffectivePrice(item), priceReference: saved ? 'Mi tarifa guardada' : source.label || '', priceReferenceUrl: source.url || '', priceRange: saved ? '' : item.range || '', priceReferenceNote: saved ? 'Se ha aplicado la tarifa que guardaste para tu empresa.' : item.sourceNote || '' };
   }
   function addCatalogQuoteLine(form, catalogId) {
     if (!form) return;
-    const item = SOLAR_QUOTE_CATALOG.find(entry => entry.id === catalogId);
+    const item = quoteCatalogItems().find(entry => entry.id === catalogId);
     const list = $('[data-quote-line-list]', form);
     if (!item || !list) return;
-    const line = { category: item.category, description: item.description, quantity: suggestedCatalogQuantity(item, form), unit: item.unit, unitPrice: item.unitPrice, priceReference: (SOLAR_PRICE_SOURCES[item.source] || {}).label || '', priceReferenceUrl: (SOLAR_PRICE_SOURCES[item.source] || {}).url || '', priceRange: item.range || '', priceReferenceNote: item.sourceNote || '' };
+    const line = catalogLineForItem(item, form);
     const blank = Array.from(list.children).find(row => !($('[data-quote-field="description"]', row) || {}).value && !($('[data-quote-field="quantity"]', row) || {}).value && !($('[data-quote-field="unitPrice"]', row) || {}).value);
     if (blank) blank.outerHTML = quoteLineMarkup(line);
     else list.insertAdjacentHTML('beforeend', quoteLineMarkup(line));
     updateQuoteTotals(form);
     toast('Partida añadida al desglose.', 'good');
+  }
+  function addSolarQuoteBundle(form) {
+    const list = form && $('[data-quote-line-list]', form);
+    if (!list) return;
+    const power = num(($('[data-solar-bundle-power]', form) || {}).value);
+    if (power < 1 || power > 20) return toast('El desglose automático admite instalaciones de 1 a 20 kWp. Para potencias mayores, usa las partidas del catálogo.', 'bad');
+    const batteryKwh = num(($('[data-solar-bundle-battery]', form) || {}).value);
+    const inverterType = batteryKwh > 0 ? 'hybrid' : (($('[data-solar-bundle-inverter]', form) || {}).value || 'hybrid');
+    const inverterPower = [3, 5, 8, 10, 15, 20].find(value => value >= power) || 20;
+    const inverterId = inverterType === 'hybrid' ? (inverterPower === 5 ? 'inverter-hybrid' : 'inverter-hybrid-' + inverterPower) : (inverterPower === 5 ? 'inverter-string' : 'inverter-string-' + inverterPower);
+    const roofId = ({ tile: 'structure-tile', flat: 'structure-flat', sheet: 'structure-sheet', slate: 'structure-slate', carport: 'structure-carport' })[($('[data-solar-bundle-roof]', form) || {}).value] || 'structure-tile';
+    const singlePhase = inverterPower <= 5;
+    const panelCount = Math.ceil(power * 1000 / 450);
+    const definitions = [
+      ['panel-tier1', panelCount], [inverterId, 1], [roofId, panelCount],
+      ['cable-set-kwp', power], [singlePhase ? 'protection-kit-1ph' : 'protection-kit-3ph', 1],
+      ['grounding-kit', 1], ['smart-meter', 1], ['mounting-labor', power],
+      [power <= 10 ? 'legalization' : 'technical-project-10kw', 1], ['travel-visit', 1]
+    ];
+    if (batteryKwh > 0) definitions.splice(6, 0, ['battery-supply-5kwh', Math.ceil(batteryKwh / 5)], ['battery-retrofit-labor', 1]);
+    const existingItems = Array.from(list.children).filter(row => ($('[data-quote-field="description"]', row) || {}).value || ($('[data-quote-field="quantity"]', row) || {}).value || ($('[data-quote-field="unitPrice"]', row) || {}).value);
+    if (!existingItems.length) list.innerHTML = '';
+    const lines = definitions.map(([id, quantity]) => {
+      const item = SOLAR_QUOTE_CATALOG.find(entry => entry.id === id);
+      return item ? quoteLineMarkup(catalogLineForItem(item, form, quantity)) : '';
+    }).join('');
+    list.insertAdjacentHTML('beforeend', lines);
+    updateQuoteTotals(form);
+    toast('Desglose FV sugerido añadido: ' + panelCount + ' paneles para ' + solarNumber(power) + ' kWp. Revisa cada cantidad y precio.', 'good');
+  }
+  function saveQuoteLineToCatalog(form, row) {
+    if (!form || !row) return;
+    const category = ($('[data-quote-field="category"]', row) || {}).value || 'Otros';
+    const description = (($('[data-quote-field="description"]', row) || {}).value || '').trim();
+    const unit = (($('[data-quote-field="unit"]', row) || {}).value || '').trim();
+    const priceRaw = (($('[data-quote-field="unitPrice"]', row) || {}).value || '').trim();
+    const quantity = num(($('[data-quote-field="quantity"]', row) || {}).value) || 1;
+    if (!description || !unit || !priceRaw || num(priceRaw) < 0) return toast('Completa descripción, unidad y precio antes de guardar esta partida.', 'bad');
+    const saved = (data.company.quoteCatalog || []).slice();
+    const existing = saved.find(item => normalizeSearchText(item.description) === normalizeSearchText(description) && normalizeSearchText(item.unit) === normalizeSearchText(unit));
+    const catalogItem = { id: existing && existing.id || 'personal-' + uid(), group: 'personal', personal: true, category, description, unit, unitPrice: num(priceRaw), defaultQuantity: quantity, source: 'custom', sourceNote: 'Tarifa guardada por la empresa. Puedes editar el precio en cada presupuesto.' };
+    if (!commitChange(() => {
+      const current = data.company.quoteCatalog || [];
+      const index = current.findIndex(item => item.id === catalogItem.id);
+      if (index >= 0) current[index] = catalogItem; else current.push(catalogItem);
+      data.company.quoteCatalog = current;
+      data._meta.companyUpdated = Date.now();
+    })) return;
+    const group = $('[data-catalog-group]', form);
+    const search = $('[data-catalog-search]', form);
+    if (group) group.value = 'personal';
+    if (search) search.value = '';
+    renderQuoteCatalog(form);
+    toast(existing ? 'Tarifa actualizada en tu catálogo.' : 'Partida guardada para próximos presupuestos.', 'good');
+  }
+  function removeSavedQuoteCatalogItem(catalogId, form) {
+    const item = (data.company.quoteCatalog || []).find(entry => entry.id === catalogId);
+    if (!item || !confirm('¿Quitar «' + item.description + '» de tus partidas guardadas? Los presupuestos ya creados no cambiarán.')) return;
+    if (!commitChange(() => { data.company.quoteCatalog = (data.company.quoteCatalog || []).filter(entry => entry.id !== catalogId); data._meta.companyUpdated = Date.now(); })) return;
+    if (form) renderQuoteCatalog(form);
+    toast('Partida quitada de tu catálogo.', 'good');
   }
   function quoteItemsFromForm(form) {
     const items = [];
@@ -1713,7 +1860,7 @@ notify pgrst, 'reload schema';`;
     if (type === 'quote') item.items = quoteItemsForForm(item);
     const hasDetailedLines = type === 'quote' || (type === 'invoice' && Array.isArray(item.items) && item.items.length > 0);
     const fieldContent = hasDetailedLines
-      ? '<div class="fields">' + FIELDS[type].filter(s => !['amount', 'notes'].includes(s[0])).map(s => fieldMarkup(s, item[s[0]])).join('') + '</div>' + quoteEditorMarkup(item.items, type === 'quote') + '<div class="fields">' + fieldMarkup(FIELDS[type].find(s => s[0] === 'notes'), item.notes) + '</div>'
+      ? '<div class="fields">' + FIELDS[type].filter(s => !['amount', 'notes'].includes(s[0])).map(s => fieldMarkup(s, item[s[0]])).join('') + '</div>' + quoteEditorMarkup(item.items, type === 'quote', item.workId) + '<div class="fields">' + fieldMarkup(FIELDS[type].find(s => s[0] === 'notes'), item.notes) + '</div>'
       : '<div class="fields">' + FIELDS[type].map(s => fieldMarkup(s, item[s[0]])).join('') + '</div>';
     const title = id ? 'Editar ' + TYPE_LABEL[type] : TYPE_TITLE[type];
     const form = '<div class="modal-backdrop" data-action="backdrop"><section class="modal" role="dialog" aria-modal="true" aria-labelledby="form-title"><div class="modal-head"><h2 id="form-title">' + esc(title) + '</h2><button class="close-btn" data-action="close-modal" aria-label="Cerrar">×</button></div><form id="entity-form" data-type="' + type + '" data-id="' + esc(id || '') + '"><div class="modal-body"><p class="modal-note">Los campos marcados son necesarios para guardar el registro.</p>' + fieldContent + '</div><div class="modal-foot"><div>' + (id ? '<button type="button" class="btn btn-danger btn-sm" data-action="delete" data-type="' + type + '" data-id="' + esc(id) + '">Eliminar</button>' : '') + '</div><div><button type="button" class="btn" data-action="close-modal">Cancelar</button><button type="submit" class="btn btn-primary">Guardar</button></div></div></form></section></div>';
@@ -2213,6 +2360,9 @@ notify pgrst, 'reload schema';`;
     if (action === 'close-modal') { $('#modal-root').innerHTML = ''; return; }
     if (action === 'add-quote-line') { addQuoteLine(target.closest('form')); return; }
     if (action === 'add-catalog-quote-line') { addCatalogQuoteLine(target.closest('form'), target.dataset.catalogId); return; }
+    if (action === 'add-solar-quote-bundle') { addSolarQuoteBundle(target.closest('form')); return; }
+    if (action === 'save-quote-line-to-catalog') { saveQuoteLineToCatalog(target.closest('form'), target.closest('.quote-line-card')); return; }
+    if (action === 'remove-saved-quote-catalog-item') { removeSavedQuoteCatalogItem(target.dataset.catalogId, target.closest('form')); return; }
     if (action === 'remove-quote-line') {
       const form = target.closest('form');
       const row = target.closest('.quote-line-card');
@@ -2391,6 +2541,7 @@ notify pgrst, 'reload schema';`;
   });
   document.addEventListener('input', (event) => {
     if (event.target.matches('[data-catalog-search]')) renderQuoteCatalog(event.target.form);
+    if (event.target.matches('[data-solar-bundle-power]')) event.target.dataset.userSet = 'true';
     if (event.target.id === 'global-search-input') renderGlobalSearch(event.target.value);
     if (event.target.id === 'search-input') {
       searchText = event.target.value;
@@ -2410,6 +2561,10 @@ notify pgrst, 'reload schema';`;
     if (event.target.id === 'island-filter') { islandFilter = event.target.value || 'all'; render(); }
     if (event.target.dataset.moveType) { moveRecord(event.target.dataset.moveType, event.target.dataset.id, event.target.value); return; }
     if (event.target.form && event.target.form.id === 'entity-form' && event.target.name === 'island') event.target.dataset.inherited = 'false';
+    if (event.target.form && event.target.form.id === 'entity-form' && event.target.name === 'workId') {
+      const powerInput = $('[data-solar-bundle-power]', event.target.form);
+      if (powerInput && powerInput.dataset.userSet !== 'true') powerInput.value = quotePowerForWork(event.target.value) || 5;
+    }
     if (event.target.form && event.target.form.id === 'entity-form' && ['clientId', 'workId'].includes(event.target.name)) inheritSiteFields(event.target.form, event.target.name);
     if (event.target.id === 'restore-input') restoreFile(event.target.files && event.target.files[0]);
     if (event.target.matches('[data-solar-import]')) {

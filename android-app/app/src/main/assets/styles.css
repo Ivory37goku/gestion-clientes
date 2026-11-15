@@ -75,6 +75,9 @@ html{scroll-behavior:smooth}body{margin:0;min-height:100vh;background:radial-gra
 .quote-catalog-head strong{display:block;color:var(--text);font-size:12px}
 .quote-catalog-head p:not(.eyebrow){margin:4px 0 0;color:var(--muted);font-size:10px;line-height:1.5}
 .quote-catalog-count{flex:none;padding:5px 8px;border:1px solid var(--line);border-radius:999px;color:var(--muted);font-size:9px;font-weight:750}
+.solar-bundle-tools{display:grid;gap:10px;margin:12px 0;padding:12px;border:1px solid rgba(166,217,74,.22);border-radius:12px;background:rgba(166,217,74,.045)}
+.solar-bundle-tools>.btn{justify-self:start}.solar-bundle-tools>div:first-child .eyebrow{margin:0 0 4px;color:var(--brand);font-size:8px;font-weight:850;letter-spacing:.12em}.solar-bundle-tools>div:first-child strong{display:block;font-size:11px}.solar-bundle-tools>div:first-child p:not(.eyebrow){margin:4px 0 0;color:var(--muted);font-size:9px;line-height:1.45}
+.solar-bundle-fields{display:grid;grid-template-columns:repeat(4,minmax(0,1fr));gap:8px}.solar-bundle-fields .field{margin:0}.solar-bundle-fields .field label{font-size:9px}
 .quote-catalog-tools{display:grid;grid-template-columns:minmax(0,1.3fr) minmax(180px,.7fr);gap:9px;margin-bottom:10px}
 .quote-catalog-tools .field{margin:0}
 .quote-catalog-tools .field label{font-size:9px}
@@ -104,7 +107,7 @@ html{scroll-behavior:smooth}body{margin:0;min-height:100vh;background:radial-gra
 .solar-manual-location .solar-config-fields{margin-top:8px}
 html[data-theme="light"] .quote-catalog-card{background:rgba(28,38,22,.025)}
 html[data-theme="light"] .solar-manual-location{background:rgba(28,38,22,.025)}
-@media(max-width:740px){.quote-catalog{padding:11px}.quote-catalog-head{flex-direction:column}.quote-catalog-tools{grid-template-columns:1fr}.quote-catalog-results{grid-template-columns:1fr}.quote-catalog-card-copy{min-height:0}.quote-line-reference{flex-basis:100%;min-width:0;order:3}}
+@media(max-width:740px){.quote-catalog{padding:11px}.quote-catalog-head{flex-direction:column}.quote-catalog-tools{grid-template-columns:1fr}.quote-catalog-results{grid-template-columns:1fr}.quote-catalog-card-copy{min-height:0}.quote-line-reference{flex-basis:100%;min-width:0;order:3}.solar-bundle-fields{grid-template-columns:1fr 1fr}.solar-bundle-tools>.btn{width:100%}}
 
 .context-panel{margin-bottom:15px;padding:16px;border:1px solid rgba(166,217,74,.2);border-radius:15px;background:linear-gradient(135deg,rgba(166,217,74,.055),rgba(255,255,255,.018) 54%,rgba(255,255,255,.012))}
 .context-panel-head{display:flex;justify-content:space-between;align-items:flex-start;gap:12px;margin-bottom:13px}
