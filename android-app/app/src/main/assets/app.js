@@ -1053,6 +1053,34 @@ notify pgrst, 'reload schema';`;
     if (out.owner === '') out.owner = '';
     return out;
   }
+  function sameLocationValue(field, left, right) {
+    if (['latitude', 'longitude'].includes(field)) {
+      const leftBlank = left == null || left === '';
+      const rightBlank = right == null || right === '';
+      if (leftBlank || rightBlank) return leftBlank === rightBlank;
+      return Number(String(left).replace(',', '.')) === Number(String(right).replace(',', '.'));
+    }
+    return String(left == null ? '' : left).trim() === String(right == null ? '' : right).trim();
+  }
+  function syncLeadLocation(lead, previous, time) {
+    if (!previous || !lead) return 0;
+    const client = data.clients.find(item => item.id === lead.clientId || item.sourceLeadId === lead.id);
+    const works = data.works.filter(item => item.id === lead.workId || item.sourceLeadId === lead.id);
+    const related = (client ? [client] : []).concat(works);
+    let changedRecords = 0;
+    related.forEach(record => {
+      let changed = false;
+      ['island', 'address', 'latitude', 'longitude'].forEach(field => {
+        if (!sameLocationValue(field, record[field], previous[field])) return;
+        const nextValue = lead[field] == null ? '' : lead[field];
+        if (sameLocationValue(field, record[field], nextValue)) return;
+        record[field] = nextValue;
+        changed = true;
+      });
+      if (changed) { record.updatedAt = time; changedRecords++; }
+    });
+    return changedRecords;
+  }
   function saveEntity(form) {
     const type = form.dataset.type;
     const collection = TYPE_COLLECTION[type];
@@ -1083,8 +1111,17 @@ notify pgrst, 'reload schema';`;
     const time = nowIso();
     const index = id ? data[collection].findIndex(x => x.id === id) : -1;
     if (id && index < 0) { toast('No se encontró el registro. Actualiza la lista e inténtalo de nuevo.', 'bad'); return; }
+    const previousLead = type === 'lead' && id ? data.leads[index] : null;
+    if (type === 'work' && !id) {
+      const client = data.clients.find(item => item.id === values.clientId);
+      if (client && client.sourceLeadId) values.sourceLeadId = client.sourceLeadId;
+    }
+    let syncedLocationRecords = 0;
     if (!commitChange(() => {
-      if (id) data[collection][index] = Object.assign({}, data[collection][index], values, { updatedAt: time });
+      if (id) {
+        data[collection][index] = Object.assign({}, data[collection][index], values, { updatedAt: time });
+        if (type === 'lead') syncedLocationRecords = syncLeadLocation(data.leads[index], previousLead, time);
+      }
       else data[collection].unshift(Object.assign({ id: savedId, createdAt: time, updatedAt: time }, values));
     })) return;
     $('#modal-root').innerHTML = '';
@@ -1092,7 +1129,7 @@ notify pgrst, 'reload schema';`;
     if (type === 'team') settingsTab = 'equipo';
     setView(destination);
     renderDetail(type, savedId);
-    toast((id ? 'Cambios guardados' : 'Registro creado') + ' correctamente.', 'good');
+    toast((id ? 'Cambios guardados' : 'Registro creado') + ' correctamente.' + (syncedLocationRecords ? ' Ubicación actualizada también en ' + syncedLocationRecords + (syncedLocationRecords === 1 ? ' ficha relacionada.' : ' fichas relacionadas.') : ''), 'good');
   }
 
   function removeEntity(type, id) {
