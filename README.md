@@ -21,6 +21,7 @@ Laboral, pero conserva sus registros en una tabla separada.
 - Agenda de visitas, citas, tareas y seguimientos.
 - Panel operativo con alertas, actividad reciente, pipeline y accesos rápidos.
 - Presupuestos detallados con horas, tarifas, desplazamientos y materiales; cálculo e impresión/PDF con IGIC.
+- Estudios solares por obra con PVGIS 5.3: descarga e importación del resultado oficial, producción anual y mensual, rendimiento por kWp y resumen incluido en el presupuesto imprimible.
 - Facturas, vencimientos, pagos parciales y saldo pendiente.
 - Gastos por obra, enlaces a documentos, equipo e informes.
 - Copias JSON, exportación CSV, impresión/PDF y trabajo sin conexión.

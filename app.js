@@ -46,6 +46,7 @@ notify pgrst, 'reload schema';`;
   const ACTIVITY_TYPES = ['Llamada', 'WhatsApp', 'Correo', 'Visita', 'Reunión', 'Nota'];
   const CANARY_ISLANDS = ['Gran Canaria', 'Tenerife', 'Lanzarote', 'Fuerteventura', 'La Palma', 'La Gomera', 'El Hierro', 'La Graciosa'];
   const GRAFCAN_CONFIG_URL = 'https://www.grafcan.es/files/wmsjson/callejero_v10.json';
+  const PVGIS_CALC_URL = 'https://re.jrc.ec.europa.eu/api/v5_3/PVcalc';
   const ISLAND_CENTERS = {
     'Gran Canaria': [27.96, -15.57], Tenerife: [28.27, -16.64], Lanzarote: [29.03, -13.64], Fuerteventura: [28.36, -14.05],
     'La Palma': [28.66, -17.86], 'La Gomera': [28.12, -17.22], 'El Hierro': [27.74, -18.03], 'La Graciosa': [29.23, -13.50]
@@ -710,9 +711,32 @@ notify pgrst, 'reload schema';`;
 
   function quoteBreakdown(item) {
     const items = Array.isArray(item.items) ? item.items : [];
-    if (!items.length) return '<div class="quote-legacy-note">Este registro todavía no tiene partidas detalladas. Pulsa «Editar» para añadir horas, desplazamientos y materiales.</div>';
+    if (!items.length) return '<div class="quote-legacy-note">Este registro todavía no tiene partidas detalladas. Pulsa «Editar» para añadir horas, desplazamientos y materiales.</div>' + quoteSolarSummary(item);
     const rows = items.map(line => '<tr><td>' + esc(line.category || 'Otros') + '</td><td>' + esc(line.description || '') + '</td><td class="numeric">' + esc(num(line.quantity).toLocaleString('es-ES')) + '</td><td>' + esc(line.unit || 'ud') + '</td><td class="numeric">' + esc(money(line.unitPrice)) + '</td><td class="numeric">' + esc(money(quoteLineTotal(line))) + '</td></tr>').join('');
-    return '<section class="quote-breakdown"><div class="card-head"><div><h3>Desglose de partidas</h3><p>Mano de obra, desplazamientos, materiales y otros conceptos.</p></div></div><div class="table-wrap"><table><thead><tr><th>Tipo</th><th>Descripción</th><th class="numeric">Cantidad</th><th>Unidad</th><th class="numeric">Precio / unidad</th><th class="numeric">Importe</th></tr></thead><tbody>' + rows + '</tbody><tfoot><tr><th colspan="5">Base imponible</th><th class="numeric">' + esc(money(item.amount)) + '</th></tr><tr><th colspan="5">' + esc(item.taxName || 'IGIC') + ' (' + esc(num(item.taxRate)) + '%)</th><th class="numeric">' + esc(money(taxAmount(item))) + '</th></tr><tr class="quote-total-row"><th colspan="5">TOTAL</th><th class="numeric">' + esc(money(total(item))) + '</th></tr></tfoot></table></div></section>';
+    return '<section class="quote-breakdown"><div class="card-head"><div><h3>Desglose de partidas</h3><p>Mano de obra, desplazamientos, materiales y otros conceptos.</p></div></div><div class="table-wrap"><table><thead><tr><th>Tipo</th><th>Descripción</th><th class="numeric">Cantidad</th><th>Unidad</th><th class="numeric">Precio / unidad</th><th class="numeric">Importe</th></tr></thead><tbody>' + rows + '</tbody><tfoot><tr><th colspan="5">Base imponible</th><th class="numeric">' + esc(money(item.amount)) + '</th></tr><tr><th colspan="5">' + esc(item.taxName || 'IGIC') + ' (' + esc(num(item.taxRate)) + '%)</th><th class="numeric">' + esc(money(taxAmount(item))) + '</th></tr><tr class="quote-total-row"><th colspan="5">TOTAL</th><th class="numeric">' + esc(money(total(item))) + '</th></tr></tfoot></table></div></section>' + quoteSolarSummary(item);
+  }
+
+  function quoteSolarSummary(quote) {
+    const work = data.works.find(row => row.id === quote.workId);
+    const result = work && work.solarStudy && work.solarStudy.result;
+    if (!result || !Array.isArray(result.monthly) || !result.monthly.length) return '';
+    const left = result.monthly.slice(0, 6);
+    const right = result.monthly.slice(6, 12);
+    const monthRows = Array.from({ length: Math.max(left.length, right.length) }, (_, index) => {
+      const a = left[index];
+      const b = right[index];
+      return '<tr><td>' + esc(a ? monthName(a.month) : '') + '</td><td class="numeric">' + esc(a ? solarNumber(a.energyKwh) + ' kWh' : '') + '</td><td>' + esc(b ? monthName(b.month) : '') + '</td><td class="numeric">' + esc(b ? solarNumber(b.energyKwh) + ' kWh' : '') + '</td></tr>';
+    }).join('');
+    return '<section class="quote-solar-summary"><div class="card-head"><div><p class="eyebrow">ANÁLISIS DE LA OBRA</p><h3>Producción solar estimada · PVGIS</h3><p>Resultado calculado para esta ubicación con el sistema descrito.</p></div><span class="badge">PVGIS 5.3</span></div><div class="solar-quote-stats"><div><span>Producción anual</span><strong>' + esc(solarNumber(result.annualKwh)) + ' kWh</strong></div><div><span>Rendimiento</span><strong>' + esc(solarNumber(result.specificYield)) + ' kWh/kWp</strong></div><div><span>Potencia instalada</span><strong>' + esc(solarNumber(result.config && result.config.peakPower)) + ' kWp</strong></div><div><span>Radiación anual</span><strong>' + esc(solarNumber(result.annualIrradiation)) + ' kWh/m²</strong></div></div><div class="table-wrap solar-month-table"><table><thead><tr><th>Mes</th><th class="numeric">Producción</th><th>Mes</th><th class="numeric">Producción</th></tr></thead><tbody>' + monthRows + '</tbody></table></div><p class="solar-source-note">Fuente: PVGIS 5.3, Comisión Europea (JRC), ubicación ' + esc(solarNumber(result.latitude)) + ', ' + esc(solarNumber(result.longitude)) + '. Producción media estimada; el resultado final depende de sombras, instalación y consumo real.</p></section>';
+  }
+
+  function solarNumber(value) {
+    const n = Number(value);
+    return Number.isFinite(n) ? new Intl.NumberFormat('es-ES', { maximumFractionDigits: 2 }).format(n) : '—';
+  }
+  function monthName(month) {
+    const value = Number(month);
+    return Number.isInteger(value) && value >= 1 && value <= 12 ? new Date(2000, value - 1, 1).toLocaleDateString('es-ES', { month: 'short' }) : '—';
   }
 
   function quickAction(label, type, context, description) {
@@ -754,6 +778,121 @@ notify pgrst, 'reload schema';`;
       ? '<button type="button" class="btn btn-sm" data-action="sync-lead-location" data-id="' + esc(item.id) + '">Copiar ubicación a cliente y obras</button>' : '';
     const leadSyncNote = isLead && leadTargets && leadTargets.related.length ? ' Puedes copiar ahora esta ubicación al cliente y a sus obras vinculadas desde el botón anterior.' : '';
     return '<section class="location-panel"><div class="location-panel-head"><div><p class="eyebrow">UBICACIÓN Y CONTACTO</p><h3>' + esc(destination) + '</h3><p>' + esc(locationText || note) + '</p></div>' + (client ? '<span class="badge">' + esc(client.company || client.name || 'Cliente') + '</span>' : '') + '</div>' + mapActions + (leadSyncAction ? '<div class="location-actions location-sync-actions">' + leadSyncAction + '</div>' : '') + '<iframe class="grafcan-frame" src="' + esc(grafcanViewerUrl(mapRecord, island)) + '" title="Mapa de GRAFCAN · ' + esc(destination) + '" loading="lazy" referrerpolicy="strict-origin-when-cross-origin" allowfullscreen></iframe><p class="location-note">' + esc(note) + ' Los enlaces de ruta y aviso se abren en la aplicación correspondiente; el WhatsApp queda preparado para que lo revises y lo envíes.' + esc(leadSyncNote) + '</p></section>';
+  }
+
+  function renderSolarStudyPanel(work, workId) {
+    const study = work.solarStudy || {};
+    const result = study.result || null;
+    const config = study.config || (result && result.config) || {};
+    const client = data.clients.find(row => row.id === work.clientId);
+    const island = siteIsland(work, null, client);
+    const savedAt = result && result.generatedAt ? dateFmt(result.generatedAt) : '';
+    const configPending = result && config.updatedAt && result.generatedAt && config.updatedAt > result.generatedAt;
+    const months = result && Array.isArray(result.monthly) ? result.monthly : [];
+    const maxMonth = Math.max(1, ...months.map(month => num(month.energyKwh)));
+    const chart = months.map(month => {
+      const height = Math.max(6, Math.min(100, Math.round(num(month.energyKwh) / maxMonth * 100)));
+      return '<div class="solar-month"><div class="solar-bar-track"><i style="height:' + height + '%"></i></div><strong>' + esc(solarNumber(month.energyKwh)) + '</strong><small>' + esc(monthName(month.month)) + '</small></div>';
+    }).join('');
+    const resultBody = result ? '<div class="solar-stats"><div class="solar-stat solar-stat-primary"><span>Producción anual estimada</span><strong>' + esc(solarNumber(result.annualKwh)) + ' <small>kWh/año</small></strong></div><div class="solar-stat"><span>Rendimiento específico</span><strong>' + esc(solarNumber(result.specificYield)) + ' <small>kWh/kWp</small></strong></div><div class="solar-stat"><span>Radiación en los módulos</span><strong>' + esc(solarNumber(result.annualIrradiation)) + ' <small>kWh/m²/año</small></strong></div></div><div class="solar-chart-head"><strong>Producción media por mes</strong><span>Guardado ' + esc(savedAt) + '</span></div><div class="solar-chart" aria-label="Producción solar media mensual en kWh">' + chart + '</div><div class="solar-result-meta"><span>' + esc(solarNumber(result.config && result.config.peakPower)) + ' kWp instalados</span><span>Inclinación ' + esc(solarNumber(result.config && result.config.tilt)) + '°</span><span>Orientación ' + esc(solarNumber(result.config && result.config.azimuth)) + '°</span><span>Datos ' + esc(result.radiationDatabase || 'PVGIS') + '</span></div>' + (configPending ? '<p class="solar-pending-note">Has cambiado la configuración. El gráfico sigue mostrando el último resultado importado; vuelve a calcular e importa el nuevo archivo para actualizarlo.</p>' : '') : '<div class="solar-empty"><strong>Estudio solar aún sin calcular</strong><p>Configura potencia, orientación y ubicación para obtener la producción mensual estimada de esta obra.</p></div>';
+    const actions = '<div class="solar-actions"><button type="button" class="btn btn-primary btn-sm" data-action="solar-config" data-id="' + esc(workId) + '">' + (config ? 'Editar parámetros' : 'Preparar estudio solar') + '</button>' + (config.latitude != null && config.longitude != null ? '<button type="button" class="btn btn-sm" data-action="solar-download" data-id="' + esc(workId) + '">Descargar resultado PVGIS</button>' : '') + '<label class="btn btn-sm solar-import-label">Importar resultado JSON<input class="solar-import-input" type="file" accept=".json,application/json" data-solar-import data-work-id="' + esc(workId) + '"></label></div>';
+    const coordinates = result ? [result.latitude, result.longitude] : [config.latitude, config.longitude];
+    const location = coordinates.every(value => Number.isFinite(Number(value))) ? Number(coordinates[0]).toFixed(5) + ', ' + Number(coordinates[1]).toFixed(5) : (work.address || island || 'Ubicación por definir');
+    return '<section class="solar-study-panel"><div class="solar-panel-head"><div><p class="eyebrow">ENERGÍA · ANÁLISIS DE PROYECTO</p><h3>Estudio solar de la obra</h3><p>Producción estimada por ubicación con la base de radiación PVGIS 5.3 de la Comisión Europea.</p></div><span class="badge">PVGIS 5.3</span></div><div class="solar-location-line"><span>⌖</span><span>' + esc(location) + '</span><span>' + esc(island) + '</span></div>' + resultBody + actions + '<p class="solar-source-note">El estudio usa la potencia, orientación, inclinación y pérdidas indicadas. La producción es una estimación del sistema y no sustituye la comprobación técnica de sombras ni el perfil de consumo.</p></section>';
+  }
+
+  function openSolarConfig(workId) {
+    const work = data.works.find(row => row.id === workId);
+    if (!work) return toast('No se encontró la obra para preparar el estudio solar.', 'bad');
+    const client = data.clients.find(row => row.id === work.clientId);
+    const saved = work.solarStudy && work.solarStudy.config || {};
+    const coords = siteCoordinates(work) || siteCoordinates(client) || [];
+    const latitude = saved.latitude != null ? saved.latitude : (coords[0] == null ? '' : coords[0]);
+    const longitude = saved.longitude != null ? saved.longitude : (coords[1] == null ? '' : coords[1]);
+    const mapRecord = coords.length ? { latitude: coords[0], longitude: coords[1] } : null;
+    const mapLink = '<a class="text-link" href="' + esc(grafcanViewerUrl(mapRecord, siteIsland(work, null, client))) + '" target="_blank" rel="noopener">Abrir GRAFCAN para consultar coordenadas ↗</a>';
+    const modal = '<div class="modal-backdrop" data-action="backdrop"><section class="modal solar-config-modal" role="dialog" aria-modal="true" aria-labelledby="solar-config-title"><div class="modal-head"><h2 id="solar-config-title">Configurar estudio PVGIS</h2><button type="button" class="close-btn" data-action="close-modal" aria-label="Cerrar">×</button></div><form id="solar-config-form" data-work-id="' + esc(workId) + '"><div class="modal-body"><p class="modal-note">Las coordenadas deben señalar el tejado o la instalación. ' + esc(work.name) + ' · ' + esc(work.address || (client && client.address) || siteIsland(work, null, client) || '') + '</p>' + mapLink + '<div class="fields solar-config-fields"><div class="field"><label for="solar-latitude">Latitud</label><input id="solar-latitude" name="latitude" type="number" step="0.000001" min="-90" max="90" value="' + esc(latitude) + '" required></div><div class="field"><label for="solar-longitude">Longitud</label><input id="solar-longitude" name="longitude" type="number" step="0.000001" min="-180" max="180" value="' + esc(longitude) + '" required></div><div class="field"><label for="solar-power">Potencia pico (kWp)</label><input id="solar-power" name="peakPower" type="number" min="0.1" max="1000" step="0.1" value="' + esc(saved.peakPower == null ? '5' : saved.peakPower) + '" required></div><div class="field"><label for="solar-loss">Pérdidas del sistema (%)</label><input id="solar-loss" name="loss" type="number" min="0" max="99" step="0.1" value="' + esc(saved.loss == null ? '14' : saved.loss) + '" required></div><div class="field"><label for="solar-tilt">Inclinación del panel (°)</label><input id="solar-tilt" name="tilt" type="number" min="0" max="90" step="1" value="' + esc(saved.tilt == null ? '15' : saved.tilt) + '" required></div><div class="field"><label for="solar-azimuth">Orientación (°)</label><input id="solar-azimuth" name="azimuth" type="number" min="-180" max="180" step="1" value="' + esc(saved.azimuth == null ? '0' : saved.azimuth) + '" required><span class="hint">0° sur · 90° oeste · −90° este</span></div><div class="field full"><label for="solar-mounting">Montaje</label><select id="solar-mounting" name="mounting"><option value="building"' + (saved.mounting !== 'free' ? ' selected' : '') + '>Sobre tejado / integrado en edificio</option><option value="free"' + (saved.mounting === 'free' ? ' selected' : '') + '>Estructura independiente</option></select></div></div><div class="solar-download-steps"><strong>Cómo guardar el resultado real</strong><ol><li>Guarda la configuración y abre PVGIS.</li><li>PVGIS descargará su resultado como archivo JSON.</li><li>Vuelve a esta obra y pulsa «Importar resultado JSON».</li></ol><p>El archivo queda guardado en la ficha y se sincroniza entre tus dispositivos.</p></div></div><div class="modal-foot"><span></span><div><button type="button" class="btn" data-action="close-modal">Cancelar</button><button type="submit" class="btn btn-primary">Guardar y calcular con PVGIS</button></div></div></form></section></div>';
+    $('#modal-root').innerHTML = modal;
+  }
+
+  function solarApiUrl(config) {
+    const params = new URLSearchParams({ lat: String(config.latitude), lon: String(config.longitude), peakpower: String(config.peakPower), loss: String(config.loss), angle: String(config.tilt), aspect: String(config.azimuth), mountingplace: config.mounting || 'building', pvtechchoice: 'crystSi', raddatabase: 'PVGIS-SARAH3', outputformat: 'json', browser: '1' });
+    return PVGIS_CALC_URL + '?' + params.toString();
+  }
+
+  function openPVGISDownload(config) {
+    const link = document.createElement('a');
+    link.href = solarApiUrl(config);
+    link.target = '_blank';
+    link.rel = 'noopener';
+    link.style.display = 'none';
+    document.body.appendChild(link);
+    link.click();
+    link.remove();
+  }
+
+  function saveSolarConfiguration(form) {
+    const workId = form.dataset.workId;
+    const work = data.works.find(row => row.id === workId);
+    if (!work) return toast('No se encontró la obra donde guardar el estudio.', 'bad');
+    const values = Object.fromEntries(new FormData(form).entries());
+    const config = { latitude: num(values.latitude), longitude: num(values.longitude), peakPower: num(values.peakPower), loss: num(values.loss), tilt: num(values.tilt), azimuth: num(values.azimuth), mounting: values.mounting === 'free' ? 'free' : 'building', updatedAt: nowIso() };
+    if (!Number.isFinite(config.latitude) || Math.abs(config.latitude) > 90 || !Number.isFinite(config.longitude) || Math.abs(config.longitude) > 180 || config.peakPower <= 0 || config.loss < 0 || config.loss >= 100 || config.tilt < 0 || config.tilt > 90 || config.azimuth < -180 || config.azimuth > 180) return toast('Revisa las coordenadas y los parámetros del sistema.', 'bad');
+    const study = Object.assign({}, work.solarStudy || {}, { config });
+    if (!commitChange(() => { work.solarStudy = study; work.updatedAt = nowIso(); })) return;
+    $('#modal-root').innerHTML = '';
+    renderDetail('work', workId);
+    openPVGISDownload(config);
+    toast('Configuración guardada. Cuando PVGIS descargue el JSON, impórtalo desde esta obra.', 'good');
+  }
+
+  function downloadSolarResult(workId) {
+    const work = data.works.find(row => row.id === workId);
+    const config = work && work.solarStudy && work.solarStudy.config;
+    if (!config) return toast('Primero configura el estudio solar de esta obra.', 'bad');
+    openPVGISDownload(config);
+    toast('Se ha abierto la descarga oficial de PVGIS. Después importa el archivo JSON en esta obra.', 'good');
+  }
+
+  function importSolarResult(file, workId) {
+    if (!file) return;
+    if (file.size > 5 * 1024 * 1024) return toast('El resultado supera el tamaño permitido para un informe PVGIS.', 'bad');
+    const reader = new FileReader();
+    reader.onload = () => {
+      try {
+        const source = JSON.parse(String(reader.result || '{}'));
+        const totals = source.outputs && source.outputs.totals && source.outputs.totals.fixed;
+        const rows = source.outputs && source.outputs.monthly && source.outputs.monthly.fixed;
+        const location = source.inputs && source.inputs.location;
+        const module = source.inputs && source.inputs.pv_module;
+        const fixed = source.inputs && source.inputs.mounting_system && source.inputs.mounting_system.fixed;
+        const work = data.works.find(row => row.id === workId);
+        if (!work || !totals || !Array.isArray(rows) || rows.length !== 12 || !location || !module || !fixed) throw new Error('La estructura del informe no coincide con el resultado de PVGIS 5.3.');
+        const latitude = Number(location.latitude);
+        const longitude = Number(location.longitude);
+        const peakPower = Number(module.peak_power);
+        const annualKwh = Number(totals.E_y);
+        if (![latitude, longitude, peakPower, annualKwh].every(Number.isFinite) || Math.abs(latitude) > 90 || Math.abs(longitude) > 180 || peakPower <= 0 || annualKwh <= 0) throw new Error('El informe no contiene valores de ubicación o producción válidos.');
+        const current = work.solarStudy && work.solarStudy.config;
+        const sourceTilt = Number(fixed.slope && fixed.slope.value) || 0;
+        const sourceAzimuth = Number(fixed.azimuth && fixed.azimuth.value) || 0;
+        const sourceLoss = Number(module.system_loss) || 0;
+        const sourceMounting = String(fixed.type || '').toLowerCase().includes('free') ? 'free' : 'building';
+        if (current && (Math.abs(num(current.latitude) - latitude) > 0.001 || Math.abs(num(current.longitude) - longitude) > 0.001 || Math.abs(num(current.peakPower) - peakPower) > 0.05 || Math.abs(num(current.loss) - sourceLoss) > 0.1 || Math.abs(num(current.tilt) - sourceTilt) > 1 || Math.abs(num(current.azimuth) - sourceAzimuth) > 1 || (current.mounting || 'building') !== sourceMounting)) throw new Error('El archivo no coincide con los parámetros guardados en esta obra. Descárgalo de nuevo desde aquí y luego impórtalo.');
+        const config = { latitude, longitude, peakPower, loss: sourceLoss, tilt: sourceTilt, azimuth: sourceAzimuth, mounting: sourceMounting, updatedAt: nowIso() };
+        const monthly = rows.map(row => ({ month: Number(row.month), energyKwh: Number(row.E_m), irradiationKwhM2: Number(row['H(i)_m']) })).filter(row => Number.isInteger(row.month) && Number.isFinite(row.energyKwh) && Number.isFinite(row.irradiationKwhM2)).sort((a, b) => a.month - b.month);
+        if (monthly.length !== 12 || monthly.some((row, index) => row.month !== index + 1)) throw new Error('El informe no incluye los doce valores mensuales de producción.');
+        const radiationDatabase = source.inputs.meteo_data && source.inputs.meteo_data.radiation_db || 'PVGIS';
+        const result = { latitude, longitude, elevation: Number(location.elevation) || null, annualKwh, specificYield: annualKwh / peakPower, annualIrradiation: Number(totals['H(i)_y']) || 0, annualDeviation: Number(totals.SD_y) || 0, radiationDatabase: String(radiationDatabase), config, monthly, generatedAt: nowIso() };
+        if (!commitChange(() => { work.solarStudy = Object.assign({}, work.solarStudy || {}, { config, result }); work.updatedAt = nowIso(); })) return;
+        renderDetail('work', workId);
+        toast('Estudio PVGIS guardado en la obra con los doce meses de producción.', 'good');
+      } catch (error) {
+        toast(error && error.message ? error.message : 'No se pudo leer el informe PVGIS. Selecciona el JSON descargado desde esta obra.', 'bad');
+      }
+    };
+    reader.onerror = () => toast('No se pudo leer el archivo seleccionado.', 'bad');
+    reader.readAsText(file);
   }
 
   function workQuickActions(work) {
@@ -1007,12 +1146,13 @@ notify pgrst, 'reload schema';`;
     if (type === 'team') { add('Puesto', item.role); add('Correo', item.email); add('Teléfono', item.phone); add('Estado', item.active === false ? 'Inactivo' : 'Activo'); }
     if (type === 'payment') { add('Factura', selected(data.invoices, item.invoiceId)); add('Fecha', dateFmt(item.date)); add('Método', item.method); add('Importe', money(item.amount)); add('Notas', item.notes); }
     const extraActions = type === 'lead' && !item.clientId && item.stage !== 'Perdido' ? '<button type="button" class="btn btn-primary btn-sm" data-action="convert-lead" data-id="' + esc(id) + '">Pasar a cliente</button>' : type === 'quote' ? '<button class="btn btn-sm" data-action="print">Imprimir / guardar PDF</button>' + (item.status !== 'Rechazada' ? '<button class="btn btn-primary btn-sm" data-action="quote-to-invoice" data-id="' + esc(id) + '">Crear factura</button>' : '') : type === 'invoice' && outstanding(item) > 0 ? '<button class="btn btn-primary btn-sm" data-action="payment" data-id="' + esc(id) + '">Registrar cobro</button>' : '';
-    const breakdown = ['quote', 'invoice'].includes(type) && Array.isArray(item.items) && item.items.length ? quoteBreakdown(item) : '';
+    const breakdown = type === 'quote' ? quoteBreakdown(item) : type === 'invoice' && Array.isArray(item.items) && item.items.length ? quoteBreakdown(item) : '';
     const processPanel = type === 'lead' ? leadProcessPanel(item) : ['client', 'work'].includes(type) ? clientWorkProcessPanel(type, item, id) : '';
+    const solarPanel = type === 'work' ? renderSolarStudyPanel(item, id) : '';
     const locationPanel = renderLocationPanel(type, item);
     const activityPanel = activityTimeline(type, item);
     const relationships = renderRelationships(type, item, id);
-    const modal = '<div class="modal-backdrop" data-action="backdrop"><section class="modal" role="dialog" aria-modal="true" aria-labelledby="detail-title"><div class="modal-head"><h2 id="detail-title">' + esc(title) + '</h2><button type="button" class="close-btn" data-action="close-modal" aria-label="Cerrar">×</button></div><div class="modal-body">' + processPanel + activityPanel + locationPanel + '<div class="list">' + facts.join('') + '</div>' + breakdown + relationships + '</div><div class="modal-foot"><div>' + extraActions + '</div><div><button type="button" class="btn btn-danger btn-sm" data-action="delete" data-type="' + type + '" data-id="' + esc(id) + '">Eliminar</button><button type="button" class="btn btn-primary btn-sm" data-action="edit" data-type="' + type + '" data-id="' + esc(id) + '">Editar</button></div></div></section></div>';
+    const modal = '<div class="modal-backdrop" data-action="backdrop"><section class="modal" role="dialog" aria-modal="true" aria-labelledby="detail-title"><div class="modal-head"><h2 id="detail-title">' + esc(title) + '</h2><button type="button" class="close-btn" data-action="close-modal" aria-label="Cerrar">×</button></div><div class="modal-body">' + processPanel + solarPanel + activityPanel + locationPanel + '<div class="list">' + facts.join('') + '</div>' + breakdown + relationships + '</div><div class="modal-foot"><div>' + extraActions + '</div><div><button type="button" class="btn btn-danger btn-sm" data-action="delete" data-type="' + type + '" data-id="' + esc(id) + '">Eliminar</button><button type="button" class="btn btn-primary btn-sm" data-action="edit" data-type="' + type + '" data-id="' + esc(id) + '">Editar</button></div></div></section></div>';
     $('#modal-root').innerHTML = modal;
   }
 
@@ -1696,6 +1836,8 @@ notify pgrst, 'reload schema';`;
     if (action === 'edit-activity') { openActivityForm('', '', target.dataset.id); return; }
     if (action === 'delete-activity') { deleteActivity(target.dataset.id); return; }
     if (action === 'sync-lead-location') { syncLeadLocationNow(target.dataset.id); return; }
+    if (action === 'solar-config') { openSolarConfig(target.dataset.id); return; }
+    if (action === 'solar-download') { downloadSolarResult(target.dataset.id); return; }
     if (action === 'quote-to-invoice') { quoteToInvoice(target.dataset.id); return; }
     if (action === 'payment') { openPayment(target.dataset.id); return; }
     if (action === 'toggle-task') {
@@ -1826,6 +1968,7 @@ notify pgrst, 'reload schema';`;
   document.addEventListener('submit', (event) => {
     if (event.target.id === 'entity-form') { event.preventDefault(); saveEntity(event.target); }
     else if (event.target.id === 'activity-form') { event.preventDefault(); saveActivity(event.target); }
+    else if (event.target.id === 'solar-config-form') { event.preventDefault(); saveSolarConfiguration(event.target); }
     else if (event.target.id === 'company-form') {
       event.preventDefault();
       const companyValues = {};
@@ -1862,6 +2005,12 @@ notify pgrst, 'reload schema';`;
     if (event.target.form && event.target.form.id === 'entity-form' && event.target.name === 'island') event.target.dataset.inherited = 'false';
     if (event.target.form && event.target.form.id === 'entity-form' && ['clientId', 'workId'].includes(event.target.name)) inheritSiteFields(event.target.form, event.target.name);
     if (event.target.id === 'restore-input') restoreFile(event.target.files && event.target.files[0]);
+    if (event.target.matches('[data-solar-import]')) {
+      const file = event.target.files && event.target.files[0];
+      const workId = event.target.dataset.workId;
+      event.target.value = '';
+      importSolarResult(file, workId);
+    }
     if (event.target.matches('[data-quote-field="category"]')) {
       const row = event.target.closest('.quote-line-card');
       const unit = row && $('[data-quote-field="unit"]', row);
