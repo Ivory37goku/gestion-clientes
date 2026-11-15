@@ -563,11 +563,13 @@ notify pgrst, 'reload schema';`;
     const mark = $('#app-brand-mark');
     const image = $('#app-brand-icon');
     const icon = brandIconDataUrl(brand);
-    if (image) image.src = brand.logoData || icon;
+    // Keep the app chrome on the compact generated mark. The complete company
+    // logo is reserved for the brand preview and customer-facing documents.
+    if (image) image.src = icon;
     if (mark) {
-      mark.classList.toggle('has-logo', Boolean(brand.logoData));
+      mark.classList.remove('has-logo');
       mark.dataset.iconShape = brand.iconShape;
-      mark.dataset.logoBackground = brand.logoBackground;
+      mark.removeAttribute('data-logo-background');
     }
     const brandName = $('#app-brand-name'); if (brandName) brandName.textContent = brand.appName;
     const tagline = $('#app-brand-tagline'); if (tagline) tagline.textContent = brand.tagline;
@@ -598,20 +600,20 @@ notify pgrst, 'reload schema';`;
     const appTagline = $('#app-brand-tagline'); if (appTagline) appTagline.textContent = brand.tagline;
     const previewMark = $('#brand-preview-mark');
     const previewImage = $('#brand-preview-icon');
-    if (previewImage) previewImage.src = brand.logoData || brandIconDataUrl(brand);
+    if (previewImage) previewImage.src = brandIconDataUrl(brand);
     if (previewMark) {
-      previewMark.classList.toggle('has-logo', Boolean(brand.logoData));
+      previewMark.classList.remove('has-logo');
       previewMark.dataset.iconShape = brand.iconShape;
-      previewMark.dataset.logoBackground = brand.logoBackground;
+      previewMark.removeAttribute('data-logo-background');
     }
     const iconPreview = $('#brand-icon-preview');
     if (iconPreview) iconPreview.src = brandIconDataUrl(brand);
-    const appIcon = $('#app-brand-icon'); if (appIcon) appIcon.src = brand.logoData || brandIconDataUrl(brand);
+    const appIcon = $('#app-brand-icon'); if (appIcon) appIcon.src = brandIconDataUrl(brand);
     const appMark = $('#app-brand-mark');
     if (appMark) {
-      appMark.classList.toggle('has-logo', Boolean(brand.logoData));
+      appMark.classList.remove('has-logo');
       appMark.dataset.iconShape = brand.iconShape;
-      appMark.dataset.logoBackground = brand.logoBackground;
+      appMark.removeAttribute('data-logo-background');
     }
     const logoPreview = $('#brand-logo-preview');
     if (logoPreview) {
@@ -2931,7 +2933,37 @@ notify pgrst, 'reload schema';`;
   setInterval(() => { if (cloudUser && !document.hidden) syncCloud(false); }, 60000);
   window.__gestionClientesNativeSaveResult = (requestId, saved) => toast(saved ? 'Archivo guardado.' : 'No se guardó el archivo.', saved ? 'good' : 'bad');
   if ('serviceWorker' in navigator && location.protocol !== 'file:') {
-    navigator.serviceWorker.register('./sw.js', { scope: './' }).catch(err => console.warn('No se pudo activar el modo sin conexión.', err));
+    let updateWaiting = false;
+    let refreshingForUpdate = false;
+    let updateNoticeShown = false;
+    const hasUnsubmittedChanges = () => $$('input,textarea,select').some(control => {
+      if (control.disabled) return false;
+      if (control.type === 'file') return Boolean(control.files && control.files.length);
+      if (control.type === 'checkbox' || control.type === 'radio') return control.checked !== control.defaultChecked;
+      if (control.tagName === 'SELECT') return Array.from(control.options).some(option => option.selected !== option.defaultSelected);
+      return control.value !== control.defaultValue;
+    });
+    const refreshAfterUpdateWhenSafe = () => {
+      if (!updateWaiting || refreshingForUpdate || document.hidden) return;
+      if (hasUnsubmittedChanges()) {
+        if (!updateNoticeShown) {
+          updateNoticeShown = true;
+          toast('Hay una actualización lista. Se aplicará al terminar tus cambios.', 'good');
+        }
+        return;
+      }
+      refreshingForUpdate = true;
+      window.location.reload();
+    };
+    navigator.serviceWorker.addEventListener('controllerchange', () => {
+      if (!navigator.serviceWorker.controller || refreshingForUpdate) return;
+      updateWaiting = true;
+      setTimeout(refreshAfterUpdateWhenSafe, 350);
+    });
+    navigator.serviceWorker.register('./sw.js', { scope: './' })
+      .then(registration => registration.update())
+      .catch(err => console.warn('No se pudo activar el modo sin conexión.', err));
+    setInterval(refreshAfterUpdateWhenSafe, 3000);
   }
   applyTheme();
   render();
