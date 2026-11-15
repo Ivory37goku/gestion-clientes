@@ -57,7 +57,7 @@ La paleta, el icono y el logo están a mano en **Administración → Marca** (ta
 | Plataforma | Descarga o acceso |
 | --- | --- |
 | Web / PWA | [Abrir Gestión Clientes](https://ivory37goku.github.io/gestion-clientes/) |
-| Android | [Descargar APK 1.0.17](https://raw.githubusercontent.com/Ivory37goku/gestion-clientes/main/downloads/gestion-clientes-1.0.17.apk) |
+| Android | [Descargar APK 1.0.18](https://raw.githubusercontent.com/Ivory37goku/gestion-clientes/main/downloads/gestion-clientes-1.0.18.apk) |
 | Windows | [Abrir las compilaciones de Windows](https://github.com/Ivory37goku/gestion-clientes/actions/workflows/windows.yml) |
 
 En Android, descarga el APK e instálalo desde el dispositivo. En Windows, abre la última ejecución correcta del workflow y descarga el artefacto `gestion-clientes-windows`, que contiene el instalador y la versión portable. La PWA también se puede añadir a la pantalla de inicio desde el navegador.
