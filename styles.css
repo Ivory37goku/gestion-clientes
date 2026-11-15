@@ -375,8 +375,10 @@ html[data-theme="light"] .view-root:has(.dashboard-hero) .row-item:hover,html[da
 .kanban-column>header{position:sticky;top:-9px;z-index:1;display:flex;align-items:center;justify-content:space-between;gap:8px;margin:-9px -9px 9px;padding:11px 10px;border-bottom:1px solid var(--line-soft);border-radius:13px 13px 0 0;background:color-mix(in srgb,var(--panel) 94%,transparent);backdrop-filter:blur(12px)}
 .kanban-column>header strong{font-size:11px}.kanban-column>header span{display:grid;place-items:center;min-width:22px;height:22px;padding:0 6px;border:1px solid var(--line-soft);border-radius:99px;color:var(--muted);font-size:9px;font-weight:800}
 .kanban-column-cards{display:grid;align-content:start;gap:8px}
-.kanban-card{padding:10px;border:1px solid var(--line-soft);border-radius:11px;background:linear-gradient(145deg,rgba(255,255,255,.045),rgba(255,255,255,.018));transition:transform .16s ease,border-color .16s ease,background .16s ease}
+.kanban-card{position:relative;padding:10px;border:1px solid var(--line-soft);border-radius:11px;background:linear-gradient(145deg,rgba(255,255,255,.045),rgba(255,255,255,.018));cursor:grab;transition:transform .16s ease,border-color .16s ease,background .16s ease}
 .kanban-card:hover{transform:translateY(-1px);border-color:rgba(166,217,74,.26);background:rgba(166,217,74,.035)}
+.kanban-card.is-dragging{opacity:.38;cursor:grabbing}.kanban-column.is-drop-target{border-color:rgba(166,217,74,.55);background:rgba(166,217,74,.1);box-shadow:inset 0 0 0 1px rgba(166,217,74,.16)}
+.kanban-drag-handle{position:absolute;top:7px;right:3px;color:var(--muted);font-size:14px;opacity:.45}.kanban-card:hover .kanban-drag-handle{opacity:1;color:var(--brand)}
 .kanban-card-open{display:grid;width:100%;gap:6px;padding:0;border:0;background:transparent;text-align:left}
 .kanban-card-open>strong{overflow:hidden;font-size:11px;text-overflow:ellipsis;white-space:nowrap}
 .kanban-card-open>span:not(.kanban-card-bottom):not(.progress){color:var(--muted);font-size:9px;line-height:1.45}
@@ -398,3 +400,16 @@ html[data-theme="light"] .kanban-move{background:#fff}
 @media(max-width:850px){.dashboard-lower-grid{grid-template-columns:repeat(2,minmax(0,1fr))}.dashboard-hero{min-height:0}}
 @media(max-width:740px){body:has(.dashboard-hero) .topbar{padding-inline:8px}.dashboard-hero{gap:14px;padding:22px}.dashboard-lower-grid{grid-template-columns:1fr}.dashboard-columns .pipeline{grid-template-columns:repeat(2,minmax(0,1fr))}}
 @media(max-width:420px){.dashboard-hero{padding:18px}.dashboard-hero .hero-actions{gap:6px}.dashboard-hero .hero-actions .btn{min-width:calc(50% - 3px);flex:1 1 calc(50% - 3px)}.dashboard-columns .pipe-step{padding:11px}}
+
+/* Field work: exact location, route and client contact */
+.location-panel{margin:0 0 14px;padding:15px;border:1px solid var(--line);border-radius:14px;background:linear-gradient(145deg,rgba(166,217,74,.075),rgba(255,255,255,.018))}
+.location-panel-head{display:flex;align-items:flex-start;justify-content:space-between;gap:12px}
+.location-panel-head h3{margin:3px 0 4px;font-size:14px}.location-panel-head p:not(.eyebrow){margin:0;color:var(--muted);font-size:10px;line-height:1.5}
+.location-actions{display:flex;flex-wrap:wrap;gap:7px;margin:12px 0}
+.grafcan-frame{display:block;width:100%;height:300px;border:1px solid var(--line-soft);border-radius:11px;background:var(--panel)}
+.location-note{margin:9px 0 0;color:var(--muted);font-size:9px;line-height:1.55}
+.row-quick-actions{flex-wrap:wrap;justify-content:flex-end}
+.row-quick-actions .btn{white-space:nowrap}
+.kanban-drag-handle{top:3px;right:0;z-index:2;display:grid;place-items:center;width:32px;height:32px;touch-action:none;cursor:grab}
+.kanban-drag-ghost{position:fixed;z-index:99999;max-width:min(260px,70vw);overflow:hidden;padding:10px 13px;border:1px solid rgba(166,217,74,.7);border-radius:10px;background:var(--panel);box-shadow:0 12px 36px rgba(0,0,0,.35);color:var(--text);font-size:11px;font-weight:750;text-overflow:ellipsis;white-space:nowrap;pointer-events:none;transform:translate(-8px,-8px)}
+@media(max-width:740px){.grafcan-frame{height:255px}.location-panel{padding:12px}.location-panel-head{flex-direction:column}.row-quick-actions{max-width:min(80vw,320px)}}

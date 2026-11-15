@@ -44,6 +44,11 @@ create policy "Users can update their own Gestión Clientes data"
 notify pgrst, 'reload schema';`;
   const COLLECTIONS = ['leads', 'clients', 'works', 'tasks', 'quotes', 'invoices', 'payments', 'expenses', 'events', 'documents', 'team'];
   const CANARY_ISLANDS = ['Gran Canaria', 'Tenerife', 'Lanzarote', 'Fuerteventura', 'La Palma', 'La Gomera', 'El Hierro', 'La Graciosa'];
+  const GRAFCAN_CONFIG_URL = 'https://www.grafcan.es/files/wmsjson/callejero_v10.json';
+  const ISLAND_CENTERS = {
+    'Gran Canaria': [27.96, -15.57], Tenerife: [28.27, -16.64], Lanzarote: [29.03, -13.64], Fuerteventura: [28.36, -14.05],
+    'La Palma': [28.66, -17.86], 'La Gomera': [28.12, -17.22], 'El Hierro': [27.74, -18.03], 'La Graciosa': [29.23, -13.50]
+  };
   const TITLES = { dashboard: 'Resumen', myday: 'Mi día', agenda: 'Agenda', visits: 'Visitas', leads: 'Leads', clients: 'Clientes', works: 'Obras', tasks: 'Tareas', incidents: 'Incidencias', maintenance: 'Mantenimiento', checklists: 'Checklists', quotes: 'Presupuestos', finance: 'Facturas y gastos', documents: 'Documentos', reports: 'Informes', team: 'Equipo', settings: 'Ajustes' };
   const TASK_CATEGORIES = ['General', 'Incidencia', 'Mantenimiento', 'Checklist'];
   const STATUS = {
@@ -119,6 +124,9 @@ notify pgrst, 'reload schema';`;
   let myDayDate = today;
   let islandFilter = 'all';
   const viewModes = { leads: 'board', works: 'board', tasks: 'board' };
+  let activeDrag = null;
+  let touchDrag = null;
+  let suppressKanbanClickUntil = 0;
 
   function load() {
     try {
@@ -258,6 +266,42 @@ notify pgrst, 'reload schema';`;
   function clientName(id) { const x = data.clients.find(r => r.id === id); return x ? (x.company || x.name) : ''; }
   function workName(id) { const x = data.works.find(r => r.id === id); return x ? x.name : ''; }
   function teamName(id) { const x = data.team.find(r => r.id === id); return x ? x.name : ''; }
+  function siteCoordinates(record) {
+    if (!record || record.latitude == null || record.longitude == null || record.latitude === '' || record.longitude === '') return null;
+    const latitude = Number(String(record.latitude).replace(',', '.'));
+    const longitude = Number(String(record.longitude).replace(',', '.'));
+    return Number.isFinite(latitude) && Number.isFinite(longitude) && Math.abs(latitude) <= 90 && Math.abs(longitude) <= 180 ? [latitude, longitude] : null;
+  }
+  function siteIsland(record, relatedWork, client) { return (record && record.island) || (relatedWork && relatedWork.island) || (client && client.island) || ''; }
+  function siteAddress(record, relatedWork, client) { return (record && record.address) || (relatedWork && relatedWork.address) || (client && client.address) || ''; }
+  function mapDestination(record, address, island) {
+    const coords = siteCoordinates(record);
+    return coords ? coords[0] + ',' + coords[1] : [address, island, 'Canarias, España'].filter(Boolean).join(', ');
+  }
+  function directionsUrl(record, address, island) {
+    const destination = mapDestination(record, address, island);
+    return 'https://www.google.com/maps/dir/?api=1&destination=' + encodeURIComponent(destination) + '&travelmode=driving';
+  }
+  function grafcanViewerUrl(record, island) {
+    const coords = siteCoordinates(record) || ISLAND_CENTERS[island] || [28.30, -15.60];
+    const params = new URLSearchParams({ config: GRAFCAN_CONFIG_URL, lat: String(coords[0]), lng: String(coords[1]), zoom: siteCoordinates(record) ? '16' : island ? '11' : '8' });
+    return 'https://visor-incrustable.devops.grafcan.es/?' + params.toString();
+  }
+  function phoneDigits(value) {
+    let digits = String(value || '').replace(/\D/g, '');
+    if (digits.startsWith('00')) digits = digits.slice(2);
+    if (digits.length === 9) digits = '34' + digits;
+    return digits;
+  }
+  function whatsappUrl(phone, message) {
+    const digits = phoneDigits(phone);
+    return digits.length >= 11 ? 'https://wa.me/' + digits + '?text=' + encodeURIComponent(message) : '';
+  }
+  function clientArrivalMessage(client, work, address) {
+    const recipient = client && (client.name || client.company) || 'buenos días';
+    const destination = work && work.name || address || 'la obra';
+    return 'Hola ' + recipient + ', voy de camino a ' + destination + (address && work && work.name ? ' (' + address + ')' : '') + '. Te aviso si cambia la hora. · ' + (data.company.name || 'Tu empresa');
+  }
   function roundMoney(value) { return Math.round((num(value) + Number.EPSILON) * 100) / 100; }
   function quoteLineTotal(item) { return roundMoney(Math.max(0, num(item.quantity)) * Math.max(0, num(item.unitPrice))); }
   function quoteBase(items) { return roundMoney((items || []).reduce((sum, item) => sum + quoteLineTotal(item), 0)); }
@@ -423,7 +467,13 @@ notify pgrst, 'reload schema';`;
       const work = data.works.find(item => item.id === e.workId);
       const client = data.clients.find(item => item.id === e.clientId) || (work && data.clients.find(item => item.id === work.clientId));
       const island = e.island || (work && work.island) || (client && client.island) || '';
-      return '<div class="row-item visit-row"><span class="visit-date"><b>' + esc(dateFmt(e.date, { day: '2-digit' })) + '</b><small>' + esc(dateFmt(e.date, { month: 'short' })) + '</small></span><div class="row-main" data-action="detail" data-type="event" data-id="' + esc(e.id) + '"><div class="row-title">' + esc(e.title) + badge(e.date < today ? 'Realizada' : e.date === today ? 'Hoy' : 'Programada') + '</div><div class="row-sub">' + esc([e.time, workName(e.workId), selected(data.clients, e.clientId), island, e.owner ? teamName(e.owner) : ''].filter(Boolean).join(' · ') || 'Sin obra ni cliente asociados') + '</div></div><div class="row-end"><button type="button" class="tiny-btn" data-action="edit" data-type="event" data-id="' + esc(e.id) + '">Editar</button></div></div>';
+      const address = siteAddress(e, work, client);
+      const coords = siteCoordinates(e) || siteCoordinates(work) || siteCoordinates(client);
+      const mapRecord = coords ? { latitude: coords[0], longitude: coords[1] } : null;
+      const message = 'Hola ' + (client && (client.name || client.company) || 'buenos días') + ', te confirmo la visita ' + (e.title ? '«' + e.title + '» ' : '') + 'para ' + dateFmt(e.date) + (e.time ? ' a las ' + e.time : '') + (address ? ' en ' + address : '') + '. · ' + (data.company.name || 'Tu empresa');
+      const arrival = whatsappUrl(client && client.phone, message);
+      const actions = (address || coords ? '<a class="btn btn-sm" href="' + esc(directionsUrl(mapRecord, address, island)) + '" target="_blank" rel="noopener">↗ Ruta</a>' : '') + '<a class="btn btn-sm" href="' + esc(grafcanViewerUrl(mapRecord, island)) + '" target="_blank" rel="noopener">GRAFCAN</a>' + (arrival ? '<a class="btn btn-sm" href="' + esc(arrival) + '" target="_blank" rel="noopener">Avisar</a>' : '') + '<button type="button" class="tiny-btn" data-action="edit" data-type="event" data-id="' + esc(e.id) + '">Editar</button>';
+      return '<div class="row-item visit-row"><span class="visit-date"><b>' + esc(dateFmt(e.date, { day: '2-digit' })) + '</b><small>' + esc(dateFmt(e.date, { month: 'short' })) + '</small></span><div class="row-main" data-action="detail" data-type="event" data-id="' + esc(e.id) + '"><div class="row-title">' + esc(e.title) + badge(e.date < today ? 'Realizada' : e.date === today ? 'Hoy' : 'Programada') + '</div><div class="row-sub">' + esc([e.time, workName(e.workId), client && (client.company || client.name), address, island, e.owner ? teamName(e.owner) : ''].filter(Boolean).join(' · ') || 'Sin obra ni cliente asociados') + '</div></div><div class="row-end row-quick-actions">' + actions + '</div></div>';
     }).join('') + '</div>' : empty(searchText || islandFilter !== 'all' ? 'No hay visitas con estos filtros' : 'Aún no hay visitas programadas', searchText || islandFilter !== 'all' ? 'Cambia la búsqueda o selecciona otra isla.' : 'Añade una visita desde aquí y se vinculará a la agenda, el cliente y la obra.', 'event', 'Programar visita', ' data-kind="Visita de obra"');
     const toolbar = '<div class="toolbar"><div class="search"><input id="search-input" type="search" value="' + esc(searchText) + '" placeholder="Buscar visita, cliente u obra…" aria-label="Buscar visitas"></div><select id="island-filter" aria-label="Filtrar por isla">' + islandOptions(islandFilter) + '</select><span class="muted small">' + visits.length + (visits.length === 1 ? ' visita' : ' visitas') + '</span></div>';
     const next = visits.filter(e => e.date >= today).length;
@@ -521,9 +571,9 @@ notify pgrst, 'reload schema';`;
           : [selected(data.clients, item.clientId), itemIsland, item.end ? 'Entrega ' + dateFmt(item.end) : 'Sin fecha de entrega'].filter(Boolean).join(' · ');
         const amount = isLead ? money(item.value) : isTask ? '' : money(item.budget);
         const select = '<label class="kanban-move-label" for="move-' + type + '-' + esc(item.id) + '">Mover a</label><select class="kanban-move" id="move-' + type + '-' + esc(item.id) + '" data-move-type="' + type + '" data-id="' + esc(item.id) + '" aria-label="Mover ' + esc(title) + ' a otra fase">' + stages.map(option => '<option value="' + esc(option) + '"' + (option === stage ? ' selected' : '') + '>' + esc(option) + '</option>').join('') + '</select>';
-        return '<article class="kanban-card"><button type="button" class="kanban-card-open" data-action="detail" data-type="' + type + '" data-id="' + esc(item.id) + '"><strong>' + esc(title) + '</strong><span>' + esc(info || 'Sin información adicional') + '</span>' + (!isTask ? '<span class="kanban-card-bottom"><b>' + esc(amount) + '</b>' + (isLead && item.owner ? '<small>' + esc(teamName(item.owner)) + '</small>' : !isLead ? '<small>' + Math.round(num(item.progress)) + '% completado</small>' : '') + '</span>' : item.owner ? '<span class="kanban-card-bottom"><small>' + esc(teamName(item.owner)) + '</small></span>' : '') + (!isLead && !isTask ? '<span class="progress"><i style="width:' + Math.min(100, Math.max(0, num(item.progress))) + '%"></i></span>' : '') + '</button>' + select + '</article>';
+        return '<article class="kanban-card" draggable="true" data-drag-type="' + type + '" data-drag-id="' + esc(item.id) + '"><button type="button" class="kanban-card-open" data-action="detail" data-type="' + type + '" data-id="' + esc(item.id) + '"><span class="kanban-drag-handle" aria-hidden="true">⠿</span><strong>' + esc(title) + '</strong><span>' + esc(info || 'Sin información adicional') + '</span>' + (!isTask ? '<span class="kanban-card-bottom"><b>' + esc(amount) + '</b>' + (isLead && item.owner ? '<small>' + esc(teamName(item.owner)) + '</small>' : !isLead ? '<small>' + Math.round(num(item.progress)) + '% completado</small>' : '') + '</span>' : item.owner ? '<span class="kanban-card-bottom"><small>' + esc(teamName(item.owner)) + '</small></span>' : '') + (!isLead && !isTask ? '<span class="progress"><i style="width:' + Math.min(100, Math.max(0, num(item.progress))) + '%"></i></span>' : '') + '</button>' + select + '</article>';
       }).join('');
-      return '<section class="kanban-column"><header><strong>' + esc(stage) + '</strong><span>' + cards.length + '</span></header><div class="kanban-column-cards">' + (cardRows || '<p class="kanban-empty">Sin registros en esta fase</p>') + '</div></section>';
+      return '<section class="kanban-column" data-drop-type="' + type + '" data-drop-status="' + esc(stage) + '"><header><strong>' + esc(stage) + '</strong><span>' + cards.length + '</span></header><div class="kanban-column-cards">' + (cardRows || '<p class="kanban-empty">Suelta aquí para mover a esta fase</p>') + '</div></section>';
     }).join('');
     return '<div class="kanban-board" aria-label="Tablero por fases de ' + (isLead ? 'leads' : isTask ? 'tareas' : 'obras') + '">' + columns + '</div>';
   }
@@ -541,7 +591,7 @@ notify pgrst, 'reload schema';`;
     else items.sort((a, b) => String(b.updatedAt || b.createdAt || '').localeCompare(String(a.updatedAt || a.createdAt || '')));
     const toolbar = '<div class="toolbar"><div class="search"><input id="search-input" type="search" value="' + esc(searchText) + '" placeholder="Buscar ' + esc(cfg.title.toLowerCase()) + '..." aria-label="Buscar ' + esc(cfg.title.toLowerCase()) + '"></div>' + (cfg.fields ? '<select id="filter-select" aria-label="Filtrar por estado"><option value="all">Todos los estados</option>' + STATUS[cfg.filter].map(s => '<option value="' + esc(s) + '"' + (filterValue === s ? ' selected' : '') + '>' + esc(s) + '</option>').join('') + (key === 'tasks' ? '<option value="Alta"' + (filterValue === 'Alta' ? ' selected' : '') + '>Alta</option><option value="Media"' + (filterValue === 'Media' ? ' selected' : '') + '>Media</option><option value="Baja"' + (filterValue === 'Baja' ? ' selected' : '') + '>Baja</option>' : '') + '</select>' : '') + (['leads', 'clients', 'works'].includes(key) ? '<select id="island-filter" aria-label="Filtrar por isla">' + islandOptions(islandFilter) + '</select>' : '') + '<span class="muted small">' + items.length + (items.length === 1 ? ' registro' : ' registros') + '</span></div>';
     const hasBoard = ['leads', 'works', 'tasks'].includes(key);
-    const boardDescription = key === 'leads' ? 'Avanza cada oportunidad por su fase y abre la ficha para contactar o convertirla en cliente.' : key === 'tasks' ? 'Prioriza el trabajo y mueve las tareas entre pendientes, en curso y hechas.' : 'Consulta el estado de entrega y mueve la obra a su siguiente fase.';
+    const boardDescription = key === 'leads' ? 'Arrastra cada oportunidad a otra fase; en móvil, usa el asa ⠿. También puedes elegir «Mover a». Abre la ficha para contactar o convertirla en cliente.' : key === 'tasks' ? 'Arrastra las tareas para cambiar su estado; en móvil, usa el asa ⠿. También puedes elegir «Mover a».' : 'Arrastra las obras a la fase siguiente; en móvil, usa el asa ⠿. También puedes elegir «Mover a» para actualizar su estado.';
     const modeToggle = hasBoard ? '<div class="board-toolbar"><p>' + esc(boardDescription) + '</p><div class="view-switch" aria-label="Vista de registros"><button type="button" class="' + (viewModes[key] === 'board' ? 'active' : '') + '" data-action="toggle-view-mode" data-view-mode="board" data-list-key="' + key + '">Kanban</button><button type="button" class="' + (viewModes[key] === 'list' ? 'active' : '') + '" data-action="toggle-view-mode" data-view-mode="list" data-list-key="' + key + '">Lista</button></div></div>' : '';
     const content = !items.length ? empty(q || filterValue !== 'all' || islandFilter !== 'all' ? 'No se encontraron resultados' : 'Todavía no hay registros', q ? 'Prueba con otra búsqueda.' : 'Crea el primero para empezar a organizarlo.', cfg.type, 'Crear ' + cfg.singular) : hasBoard && viewModes[key] === 'board' ? renderKanbanBoard(key, items) : '<div class="list">' + items.map(x => renderListRow(key, x)).join('') + '</div>';
     return head + '<section class="card">' + modeToggle + toolbar + content + '</section>';
@@ -555,7 +605,7 @@ notify pgrst, 'reload schema';`;
       return '<div class="row-item list-flow-row"><div class="row-main" data-action="detail" data-type="lead" data-id="' + esc(x.id) + '"><div class="row-title">' + esc(x.name || x.company) + badge(x.stage) + '</div><div class="row-sub">' + esc((x.company && x.name ? x.company + ' · ' : '') + (x.island ? x.island + ' · ' : '') + (x.source || 'Origen sin indicar') + (x.nextDate ? ' · próximo paso ' + dateFmt(x.nextDate) : ' · sin seguimiento')) + '</div></div><div class="row-end"><div class="row-value-block"><div class="row-amount">' + esc(money(x.value)) + '</div><div class="row-date">' + esc(x.owner ? teamName(x.owner) : 'Valor estimado') + '</div></div>' + nextAction + '</div></div>';
     }
     if (key === 'clients') return '<div class="row-item list-flow-row"><div class="row-main" data-action="detail" data-type="client" data-id="' + esc(x.id) + '"><div class="row-title">' + esc(x.company || x.name) + '</div><div class="row-sub">' + esc([x.name && x.company ? x.name : '', x.island, x.email, x.phone, data.works.filter(w => w.clientId === x.id).length + ' obras'].filter(Boolean).join(' · ')) + '</div></div><div class="row-end"><span class="row-date">' + esc(x.city || '') + '</span><button type="button" class="btn btn-sm" data-action="quick-new" data-type="work" data-client-id="' + esc(x.id) + '">＋ Crear obra</button></div></div>';
-    if (key === 'works') return '<div class="row-item list-flow-row"><div class="row-main" data-action="detail" data-type="work" data-id="' + esc(x.id) + '"><div class="row-title">' + esc(x.name) + badge(x.status) + '</div><div class="row-sub">' + esc(selected(data.clients, x.clientId) + (x.island ? ' · ' + x.island : '') + (x.address ? ' · ' + x.address : '') + (x.end ? ' · entrega ' + dateFmt(x.end) : '')) + '</div><div class="progress" style="margin-top:8px"><i style="width:' + Math.min(100, Math.max(0, num(x.progress))) + '%"></i></div></div><div class="row-end"><div class="row-value-block"><div class="row-amount">' + esc(money(x.budget)) + '</div><div class="row-date">' + esc(Math.round(num(x.progress)) + '% completado') + '</div></div><div class="row-quick-actions"><button type="button" class="btn btn-sm" data-action="quick-new" data-type="task" data-client-id="' + esc(x.clientId || '') + '" data-work-id="' + esc(x.id) + '">＋ Tarea</button><button type="button" class="btn btn-sm" data-action="quick-new" data-type="quote" data-client-id="' + esc(x.clientId || '') + '" data-work-id="' + esc(x.id) + '">Presupuesto</button></div></div></div>';
+    if (key === 'works') return '<div class="row-item list-flow-row"><div class="row-main" data-action="detail" data-type="work" data-id="' + esc(x.id) + '"><div class="row-title">' + esc(x.name) + badge(x.status) + '</div><div class="row-sub">' + esc(selected(data.clients, x.clientId) + (x.island ? ' · ' + x.island : '') + (x.address ? ' · ' + x.address : '') + (x.end ? ' · entrega ' + dateFmt(x.end) : '')) + '</div><div class="progress" style="margin-top:8px"><i style="width:' + Math.min(100, Math.max(0, num(x.progress))) + '%"></i></div></div><div class="row-end"><div class="row-value-block"><div class="row-amount">' + esc(money(x.budget)) + '</div><div class="row-date">' + esc(Math.round(num(x.progress)) + '% completado') + '</div></div><div class="row-quick-actions"><button type="button" class="btn btn-sm" data-action="quick-new" data-type="task" data-client-id="' + esc(x.clientId || '') + '" data-work-id="' + esc(x.id) + '">＋ Tarea</button><button type="button" class="btn btn-sm" data-action="quick-new" data-type="quote" data-client-id="' + esc(x.clientId || '') + '" data-work-id="' + esc(x.id) + '">Presupuesto</button>' + workQuickActions(x) + '</div></div></div>';
     if (key === 'tasks') {
       const completed = !isTaskOpen(x);
       return '<div class="row-item"><button class="tiny-btn ' + (completed ? '' : 'danger') + '" data-action="toggle-task" data-id="' + esc(x.id) + '" aria-label="' + (completed ? 'Reabrir' : 'Marcar hecha') + '">' + (completed ? '✓' : '○') + '</button><div class="row-main" data-action="detail" data-type="task" data-id="' + esc(x.id) + '"><div class="row-title">' + esc(x.title) + badge(x.status) + badge(x.category || 'General') + badge(x.priority || 'Media') + '</div><div class="row-sub">' + esc(workName(x.workId) || selected(data.clients, x.clientId) || 'Sin proyecto') + (x.owner ? ' · ' + teamName(x.owner) : '') + '</div></div><div class="row-end"><span class="row-date">' + esc(x.due ? 'Vence ' + dateFmt(x.due) : 'Sin fecha') + '</span></div></div>';
@@ -674,6 +724,43 @@ notify pgrst, 'reload schema';`;
     return '<button type="button" class="quick-action" data-action="quick-new" data-type="' + type + '" data-client-id="' + esc(clientId) + '" data-work-id="' + esc(workId) + '" data-lead-id="' + esc(leadId) + '"><span class="quick-action-icon">' + (icons[type] || '＋') + '</span><span class="quick-action-copy"><strong>' + esc(label) + '</strong><small>' + esc(description) + '</small></span><span class="quick-action-arrow">＋</span></button>';
   }
 
+  function renderLocationPanel(type, item) {
+    const isWork = type === 'work';
+    const isClient = type === 'client';
+    const isLead = type === 'lead';
+    const isVisit = type === 'event' && item.kind === 'Visita de obra';
+    if (!isWork && !isClient && !isLead && !isVisit) return '';
+    const relatedWork = isWork ? item : (isClient || isLead) ? null : data.works.find(work => work.id === item.workId);
+    const clientId = isClient ? item.id : item.clientId || (relatedWork && relatedWork.clientId) || '';
+    const client = isLead ? item : data.clients.find(record => record.id === clientId);
+    if (isClient && !siteAddress(item, null, item) && !siteCoordinates(item) && !item.island) return '';
+    if (isLead && !item.address && !siteCoordinates(item) && !item.island) return '';
+    const address = siteAddress(item, relatedWork, client);
+    const island = siteIsland(item, relatedWork, client);
+    const coords = siteCoordinates(item) || siteCoordinates(relatedWork) || siteCoordinates(client);
+    const mapRecord = coords ? { latitude: coords[0], longitude: coords[1] } : null;
+    const destination = address || (island ? 'Centro de ' + island : 'Canarias');
+    const message = isVisit
+      ? 'Hola ' + (client && (client.name || client.company) || 'buenos días') + ', te confirmo la visita ' + (item.title ? '«' + item.title + '» ' : '') + 'para ' + dateFmt(item.date) + (item.time ? ' a las ' + item.time : '') + (address ? ' en ' + address : '') + '. · ' + (data.company.name || 'Tu empresa')
+      : isLead ? 'Hola ' + (item.name || item.company || 'buenos días') + ', te escribo de ' + (data.company.name || 'nuestra empresa') + ' para coordinar una visita' + (address ? ' en ' + address : '') + '. ¿Qué día te viene bien?' : clientArrivalMessage(client, relatedWork || (isWork ? item : null), address);
+    const directionsLabel = isClient ? 'Ir a la dirección' : '↗ Cómo llegar';
+    const notifyLabel = isVisit ? 'Confirmar visita' : isClient ? 'Avisar al cliente' : isLead ? 'Contactar por WhatsApp' : 'Avisar que voy';
+    const mapActions = '<div class="location-actions">' + (address || coords ? '<a class="btn btn-primary btn-sm" href="' + esc(directionsUrl(mapRecord, address, island)) + '" target="_blank" rel="noopener">' + directionsLabel + '</a>' : '<span class="muted small">Añade la dirección o las coordenadas para abrir una ruta.</span>') + '<a class="btn btn-sm" href="' + esc(grafcanViewerUrl(mapRecord, island)) + '" target="_blank" rel="noopener">Abrir GRAFCAN ↗</a>' + (client && client.phone ? '<a class="btn btn-sm" href="tel:' + esc(client.phone.replace(/[^\d+]/g, '')) + '">Llamar</a>' : '') + (client && client.phone && whatsappUrl(client.phone, message) ? '<a class="btn btn-sm" href="' + esc(whatsappUrl(client.phone, message)) + '" target="_blank" rel="noopener">' + notifyLabel + ' por WhatsApp</a>' : '') + (client && client.email ? '<a class="btn btn-sm" href="mailto:' + esc(client.email) + '?subject=' + encodeURIComponent(isVisit ? 'Visita · ' + (item.title || destination) : isLead ? 'Coordinar visita · ' + (item.company || item.name || destination) : 'Llegada · ' + (item.name || destination)) + '&body=' + encodeURIComponent(message) + '">Correo</a>' : '') + '</div>';
+    const locationText = [address, island, coords ? coords[0].toFixed(6) + ', ' + coords[1].toFixed(6) : ''].filter(Boolean).join(' · ');
+    const note = coords ? 'Punto guardado en la ficha.' : island ? 'Mapa centrado en ' + island + '. Guarda las coordenadas para fijar el punto exacto.' : 'Completa la dirección o la isla para localizar el sitio.';
+    return '<section class="location-panel"><div class="location-panel-head"><div><p class="eyebrow">UBICACIÓN Y CONTACTO</p><h3>' + esc(destination) + '</h3><p>' + esc(locationText || note) + '</p></div>' + (client ? '<span class="badge">' + esc(client.company || client.name || 'Cliente') + '</span>' : '') + '</div>' + mapActions + '<iframe class="grafcan-frame" src="' + esc(grafcanViewerUrl(mapRecord, island)) + '" title="Mapa de GRAFCAN · ' + esc(destination) + '" loading="lazy" referrerpolicy="strict-origin-when-cross-origin" allowfullscreen></iframe><p class="location-note">' + esc(note) + ' Los enlaces de ruta y aviso se abren en la aplicación correspondiente; el WhatsApp queda preparado para que lo revises y lo envíes.</p></section>';
+  }
+
+  function workQuickActions(work) {
+    const client = data.clients.find(record => record.id === work.clientId);
+    const address = siteAddress(work, null, client);
+    const island = siteIsland(work, null, client);
+    const coords = siteCoordinates(work) || siteCoordinates(client);
+    const mapRecord = coords ? { latitude: coords[0], longitude: coords[1] } : null;
+    const arrival = whatsappUrl(client && client.phone, clientArrivalMessage(client, work, address));
+    return (address || coords ? '<a class="btn btn-sm" href="' + esc(directionsUrl(mapRecord, address, island)) + '" target="_blank" rel="noopener">↗ Ruta</a>' : '') + '<a class="btn btn-sm" href="' + esc(grafcanViewerUrl(mapRecord, island)) + '" target="_blank" rel="noopener">GRAFCAN</a>' + (arrival ? '<a class="btn btn-sm" href="' + esc(arrival) + '" target="_blank" rel="noopener">Avisar</a>' : '');
+  }
+
   function flowSteps(labels, complete, active) {
     return '<div class="flow-steps flow-steps-' + labels.length + '">' + labels.map((label, index) => '<div class="flow-step ' + (complete(index) ? 'is-done' : '') + (active === index ? ' is-active' : '') + '"><span class="flow-step-dot">' + (complete(index) ? '✓' : String(index + 1)) + '</span><span>' + esc(label) + '</span></div>').join('') + '</div>';
   }
@@ -765,34 +852,35 @@ notify pgrst, 'reload schema';`;
     const title = item.name || item.company || item.title || item.number || item.kind || 'Detalle';
     const facts = [];
     const add = (label, value) => { if (value !== '' && value != null) facts.push('<div class="row-item"><div class="row-main"><div class="row-sub">' + esc(label) + '</div><div class="row-title">' + esc(value) + '</div></div></div>'); };
-    if (type === 'lead') { add('Empresa', item.company); add('Estado', item.stage); add('Teléfono', item.phone); add('Correo', item.email); add('Isla', item.island); add('Origen', item.source); add('Valor estimado', money(item.value)); add('Próximo seguimiento', dateFmt(item.nextDate)); add('Notas', item.notes); }
+    if (type === 'lead') { add('Empresa', item.company); add('Estado', item.stage); add('Teléfono', item.phone); add('Correo', item.email); add('Isla', item.island); add('Dirección de visita', item.address); add('Coordenadas', siteCoordinates(item) ? siteCoordinates(item).join(', ') : ''); add('Origen', item.source); add('Valor estimado', money(item.value)); add('Próximo seguimiento', dateFmt(item.nextDate)); add('Notas', item.notes); }
     if (type === 'client') { add('Contacto', item.name); add('CIF / NIF', item.taxId); add('Teléfono', item.phone); add('Correo', item.email); add('Isla', item.island); add('Dirección', item.address); add('Notas', item.notes); }
-    if (type === 'work') { add('Cliente', selected(data.clients, item.clientId)); add('Estado', item.status); add('Isla', item.island); add('Dirección', item.address); add('Inicio', dateFmt(item.start)); add('Entrega prevista', dateFmt(item.end)); add('Presupuesto', money(item.budget)); add('Avance', num(item.progress) + '%'); add('Responsable', teamName(item.owner)); add('Notas', item.notes); }
+    if (type === 'work') { add('Cliente', selected(data.clients, item.clientId)); add('Estado', item.status); add('Isla', item.island); add('Dirección', item.address); add('Coordenadas', siteCoordinates(item) ? siteCoordinates(item).join(', ') : ''); add('Inicio', dateFmt(item.start)); add('Entrega prevista', dateFmt(item.end)); add('Presupuesto', money(item.budget)); add('Avance', num(item.progress) + '%'); add('Responsable', teamName(item.owner)); add('Notas', item.notes); }
     if (type === 'task') { add('Tipo de seguimiento', item.category || 'General'); add('Estado', item.status); add('Prioridad', item.priority); add('Obra', workName(item.workId)); add('Cliente', selected(data.clients, item.clientId)); add('Fecha límite', dateFmt(item.due)); add('Responsable', teamName(item.owner)); add('Descripción', item.description); }
     if (type === 'quote') { add('Cliente', selected(data.clients, item.clientId)); add('Obra', workName(item.workId)); add('Estado', item.status); add('Fecha', dateFmt(item.date)); add('Válido hasta', dateFmt(item.validUntil)); if (!Array.isArray(item.items) || !item.items.length) { add('Base imponible', money(item.amount)); add(item.taxName || (num(item.taxRate) === 21 ? 'Impuesto anterior' : 'IGIC'), num(item.taxRate) + '%'); add('Total', money(total(item))); } add('Descripción y condiciones', item.notes); }
     if (type === 'invoice') { add('Cliente', selected(data.clients, item.clientId)); add('Obra', workName(item.workId)); add('Estado', item.status); add('Emisión', dateFmt(item.date)); add('Vencimiento', dateFmt(item.due)); if (!Array.isArray(item.items) || !item.items.length) { add('Base imponible', money(item.amount)); add(item.taxName || (num(item.taxRate) === 21 ? 'Impuesto anterior' : 'IGIC'), num(item.taxRate) + '%'); add('Total', money(total(item))); } add('Cobrado', money(paidFor(item))); add('Pendiente', money(outstanding(item))); add('Descripción', item.notes); }
     if (type === 'expense') { add('Categoría', item.category); add('Proveedor', item.vendor); add('Fecha', dateFmt(item.date)); add('Importe', money(item.amount)); add('Obra', workName(item.workId)); add('Notas', item.notes); }
-    if (type === 'event') { add('Fecha', dateFmt(item.date)); add('Hora', item.time); add('Tipo', item.kind); add('Isla', item.island); add('Responsable', teamName(item.owner)); add('Notas', item.notes); }
+    if (type === 'event') { add('Fecha', dateFmt(item.date)); add('Hora', item.time); add('Tipo', item.kind); add('Isla', item.island); add('Dirección', item.address); add('Coordenadas', siteCoordinates(item) ? siteCoordinates(item).join(', ') : ''); add('Responsable', teamName(item.owner)); add('Notas', item.notes); }
     if (type === 'document') { add('Tipo', item.kind); add('Relacionado con', workName(item.workId) || selected(data.clients, item.clientId)); add('Enlace', item.url); add('Notas', item.notes); }
     if (type === 'team') { add('Puesto', item.role); add('Correo', item.email); add('Teléfono', item.phone); add('Estado', item.active === false ? 'Inactivo' : 'Activo'); }
     if (type === 'payment') { add('Factura', selected(data.invoices, item.invoiceId)); add('Fecha', dateFmt(item.date)); add('Método', item.method); add('Importe', money(item.amount)); add('Notas', item.notes); }
     const extraActions = type === 'lead' && !item.clientId && item.stage !== 'Perdido' ? '<button type="button" class="btn btn-primary btn-sm" data-action="convert-lead" data-id="' + esc(id) + '">Pasar a cliente</button>' : type === 'quote' ? '<button class="btn btn-sm" data-action="print">Imprimir / guardar PDF</button>' + (item.status !== 'Rechazada' ? '<button class="btn btn-primary btn-sm" data-action="quote-to-invoice" data-id="' + esc(id) + '">Crear factura</button>' : '') : type === 'invoice' && outstanding(item) > 0 ? '<button class="btn btn-primary btn-sm" data-action="payment" data-id="' + esc(id) + '">Registrar cobro</button>' : '';
     const breakdown = ['quote', 'invoice'].includes(type) && Array.isArray(item.items) && item.items.length ? quoteBreakdown(item) : '';
     const processPanel = type === 'lead' ? leadProcessPanel(item) : ['client', 'work'].includes(type) ? clientWorkProcessPanel(type, item, id) : '';
+    const locationPanel = renderLocationPanel(type, item);
     const relationships = renderRelationships(type, item, id);
-    const modal = '<div class="modal-backdrop" data-action="backdrop"><section class="modal" role="dialog" aria-modal="true" aria-labelledby="detail-title"><div class="modal-head"><h2 id="detail-title">' + esc(title) + '</h2><button type="button" class="close-btn" data-action="close-modal" aria-label="Cerrar">×</button></div><div class="modal-body">' + processPanel + '<div class="list">' + facts.join('') + '</div>' + breakdown + relationships + '</div><div class="modal-foot"><div>' + extraActions + '</div><div><button type="button" class="btn btn-danger btn-sm" data-action="delete" data-type="' + type + '" data-id="' + esc(id) + '">Eliminar</button><button type="button" class="btn btn-primary btn-sm" data-action="edit" data-type="' + type + '" data-id="' + esc(id) + '">Editar</button></div></div></section></div>';
+    const modal = '<div class="modal-backdrop" data-action="backdrop"><section class="modal" role="dialog" aria-modal="true" aria-labelledby="detail-title"><div class="modal-head"><h2 id="detail-title">' + esc(title) + '</h2><button type="button" class="close-btn" data-action="close-modal" aria-label="Cerrar">×</button></div><div class="modal-body">' + processPanel + locationPanel + '<div class="list">' + facts.join('') + '</div>' + breakdown + relationships + '</div><div class="modal-foot"><div>' + extraActions + '</div><div><button type="button" class="btn btn-danger btn-sm" data-action="delete" data-type="' + type + '" data-id="' + esc(id) + '">Eliminar</button><button type="button" class="btn btn-primary btn-sm" data-action="edit" data-type="' + type + '" data-id="' + esc(id) + '">Editar</button></div></div></section></div>';
     $('#modal-root').innerHTML = modal;
   }
 
   const FIELDS = {
     lead: [
-      ['name', 'Nombre de contacto', 'text', true], ['company', 'Empresa', 'text'], ['phone', 'Teléfono', 'tel'], ['email', 'Correo', 'email'], ['island', 'Isla', 'select', false, CANARY_ISLANDS], ['source', 'Origen', 'select', false, ['Recomendación', 'Web', 'Llamada', 'Redes sociales', 'Visita', 'Otro']], ['stage', 'Estado del lead', 'select', false, STATUS.lead], ['value', 'Valor estimado (€)', 'number'], ['probability', 'Probabilidad (%)', 'number'], ['nextDate', 'Próximo seguimiento', 'date'], ['owner', 'Responsable', 'team'], ['notes', 'Notas', 'textarea', false, null, 'full']
+      ['name', 'Nombre de contacto', 'text', true], ['company', 'Empresa', 'text'], ['phone', 'Teléfono', 'tel'], ['email', 'Correo', 'email'], ['island', 'Isla', 'select', false, CANARY_ISLANDS], ['address', 'Dirección de visita', 'text', false, null, 'full'], ['latitude', 'Latitud (opcional)', 'number'], ['longitude', 'Longitud (opcional)', 'number'], ['source', 'Origen', 'select', false, ['Recomendación', 'Web', 'Llamada', 'Redes sociales', 'Visita', 'Otro']], ['stage', 'Estado del lead', 'select', false, STATUS.lead], ['value', 'Valor estimado (€)', 'number'], ['probability', 'Probabilidad (%)', 'number'], ['nextDate', 'Próximo seguimiento', 'date'], ['owner', 'Responsable', 'team'], ['notes', 'Notas', 'textarea', false, null, 'full']
     ],
     client: [
-      ['company', 'Empresa / nombre comercial', 'text', true], ['name', 'Persona de contacto', 'text'], ['taxId', 'CIF / NIF', 'text'], ['phone', 'Teléfono', 'tel'], ['email', 'Correo', 'email'], ['island', 'Isla', 'select', false, CANARY_ISLANDS], ['address', 'Dirección', 'text', false, null, 'full'], ['notes', 'Notas', 'textarea', false, null, 'full']
+      ['company', 'Empresa / nombre comercial', 'text', true], ['name', 'Persona de contacto', 'text'], ['taxId', 'CIF / NIF', 'text'], ['phone', 'Teléfono', 'tel'], ['email', 'Correo', 'email'], ['island', 'Isla', 'select', false, CANARY_ISLANDS], ['address', 'Dirección', 'text', false, null, 'full'], ['latitude', 'Latitud (opcional)', 'number'], ['longitude', 'Longitud (opcional)', 'number'], ['notes', 'Notas', 'textarea', false, null, 'full']
     ],
     work: [
-      ['name', 'Nombre de la obra', 'text', true], ['clientId', 'Cliente', 'client', true], ['status', 'Estado', 'select', false, STATUS.work], ['island', 'Isla', 'select', false, CANARY_ISLANDS], ['address', 'Dirección de la obra', 'text', false, null, 'full'], ['start', 'Fecha de inicio', 'date'], ['end', 'Fecha prevista de entrega', 'date'], ['budget', 'Presupuesto (€)', 'number'], ['progress', 'Avance (%)', 'number'], ['owner', 'Responsable', 'team'], ['notes', 'Descripción / notas', 'textarea', false, null, 'full']
+      ['name', 'Nombre de la obra', 'text', true], ['clientId', 'Cliente', 'client', true], ['status', 'Estado', 'select', false, STATUS.work], ['island', 'Isla', 'select', false, CANARY_ISLANDS], ['address', 'Dirección de la obra', 'text', false, null, 'full'], ['latitude', 'Latitud (opcional)', 'number'], ['longitude', 'Longitud (opcional)', 'number'], ['start', 'Fecha de inicio', 'date'], ['end', 'Fecha prevista de entrega', 'date'], ['budget', 'Presupuesto (€)', 'number'], ['progress', 'Avance (%)', 'number'], ['owner', 'Responsable', 'team'], ['notes', 'Descripción / notas', 'textarea', false, null, 'full']
     ],
     task: [
       ['title', 'Tarea', 'text', true], ['category', 'Tipo de seguimiento', 'select', false, TASK_CATEGORIES], ['workId', 'Obra relacionada', 'work'], ['clientId', 'Cliente', 'client'], ['due', 'Fecha límite', 'date'], ['priority', 'Prioridad', 'select', false, ['Alta', 'Media', 'Baja']], ['status', 'Estado', 'select', false, STATUS.task], ['owner', 'Responsable', 'team'], ['description', 'Descripción', 'textarea', false, null, 'full']
@@ -807,7 +895,7 @@ notify pgrst, 'reload schema';`;
       ['title', 'Concepto del gasto', 'text', true], ['category', 'Categoría', 'select', false, ['Materiales', 'Personal', 'Transporte', 'Herramientas', 'Subcontrata', 'Suministros', 'Otros']], ['vendor', 'Proveedor', 'text'], ['date', 'Fecha', 'date'], ['amount', 'Importe (€)', 'number', true], ['workId', 'Obra relacionada', 'work'], ['paid', 'Estado de pago', 'select', false, ['Pendiente', 'Pagado']], ['notes', 'Notas', 'textarea', false, null, 'full']
     ],
     event: [
-      ['title', 'Título', 'text', true], ['date', 'Fecha', 'date', true], ['time', 'Hora', 'time'], ['kind', 'Tipo', 'select', false, ['Reunión', 'Llamada', 'Visita de obra', 'Entrega', 'Otro']], ['owner', 'Responsable', 'team'], ['clientId', 'Cliente', 'client'], ['workId', 'Obra', 'work'], ['island', 'Isla', 'select', false, CANARY_ISLANDS], ['notes', 'Notas', 'textarea', false, null, 'full']
+      ['title', 'Título', 'text', true], ['date', 'Fecha', 'date', true], ['time', 'Hora', 'time'], ['kind', 'Tipo', 'select', false, ['Reunión', 'Llamada', 'Visita de obra', 'Entrega', 'Otro']], ['owner', 'Responsable', 'team'], ['clientId', 'Cliente', 'client'], ['workId', 'Obra', 'work'], ['island', 'Isla', 'select', false, CANARY_ISLANDS], ['address', 'Dirección de visita', 'text', false, null, 'full'], ['latitude', 'Latitud (opcional)', 'number'], ['longitude', 'Longitud (opcional)', 'number'], ['notes', 'Notas', 'textarea', false, null, 'full']
     ],
     document: [
       ['title', 'Nombre del documento', 'text', true], ['kind', 'Tipo', 'select', false, ['Contrato', 'Plano', 'Foto', 'Permiso', 'Acta', 'Factura', 'Otro']], ['url', 'Enlace al archivo', 'url', true, null, 'full'], ['clientId', 'Cliente', 'client'], ['workId', 'Obra relacionada', 'work'], ['notes', 'Notas', 'textarea', false, null, 'full']
@@ -837,7 +925,7 @@ notify pgrst, 'reload schema';`;
     else if (kind === 'work') control = '<select id="' + id + '" name="' + name + '"' + req + '>' + optionHtml(data.works, value, 'Sin obra asociada') + '</select>';
     else if (kind === 'team') control = '<select id="' + id + '" name="' + name + '"' + req + '>' + optionHtml(personOption(), value, 'Sin asignar') + '</select>';
     else if (kind === 'invoice') control = '<select id="' + id + '" name="' + name + '"' + req + '>' + optionHtml(data.invoices, value, 'Selecciona factura') + '</select>';
-    else control = '<input id="' + id + '" name="' + name + '" type="' + kind + '" value="' + esc(value == null ? '' : value) + '"' + (kind === 'number' ? ' step="0.01" min="0"' : '') + req + '>';
+    else control = '<input id="' + id + '" name="' + name + '" type="' + kind + '" value="' + esc(value == null ? '' : value) + '"' + (kind === 'number' ? name === 'latitude' ? ' step="0.000001" min="-90" max="90"' : name === 'longitude' ? ' step="0.000001" min="-180" max="180"' : ' step="0.01" min="0"' : '') + req + '>';
     return '<div class="field ' + (size || '') + '"><label for="' + id + '">' + esc(label) + '</label>' + control + '</div>';
   }
 
@@ -946,6 +1034,10 @@ notify pgrst, 'reload schema';`;
     const title = id ? 'Editar ' + TYPE_LABEL[type] : TYPE_TITLE[type];
     const form = '<div class="modal-backdrop" data-action="backdrop"><section class="modal" role="dialog" aria-modal="true" aria-labelledby="form-title"><div class="modal-head"><h2 id="form-title">' + esc(title) + '</h2><button class="close-btn" data-action="close-modal" aria-label="Cerrar">×</button></div><form id="entity-form" data-type="' + type + '" data-id="' + esc(id || '') + '"><div class="modal-body"><p class="modal-note">Los campos marcados son necesarios para guardar el registro.</p>' + fieldContent + '</div><div class="modal-foot"><div>' + (id ? '<button type="button" class="btn btn-danger btn-sm" data-action="delete" data-type="' + type + '" data-id="' + esc(id) + '">Eliminar</button>' : '') + '</div><div><button type="button" class="btn" data-action="close-modal">Cancelar</button><button type="submit" class="btn btn-primary">Guardar</button></div></div></form></section></div>';
     $('#modal-root').innerHTML = form;
+    if (!old && preset) ['island', 'address', 'latitude', 'longitude', 'clientId'].forEach(name => {
+      const input = $('[name="' + name + '"]', $('#entity-form'));
+      if (input && preset[name] != null && preset[name] !== '') input.dataset.inherited = 'true';
+    });
     if (hasDetailedLines) updateQuoteTotals($('#entity-form'));
     const first = $('#entity-form input, #entity-form select, #entity-form textarea');
     if (first) setTimeout(() => first.focus(), 40);
@@ -954,7 +1046,7 @@ notify pgrst, 'reload schema';`;
   function readForm(form) {
     const out = {};
     new FormData(form).forEach((v, k) => { out[k] = String(v).trim(); });
-    ['value', 'amount', 'taxRate', 'progress', 'probability'].forEach(k => { if (k in out) out[k] = num(out[k]); });
+    ['value', 'amount', 'taxRate', 'progress', 'probability', 'latitude', 'longitude'].forEach(k => { if (k in out) out[k] = out[k] === '' ? '' : num(out[k]); });
     if (out.progress != null) out.progress = Math.min(100, Math.max(0, out.progress));
     if (out.paid) out.paid = out.paid === 'Pagado';
     if (out.active) out.active = out.active === 'Activo';
@@ -1029,8 +1121,8 @@ notify pgrst, 'reload schema';`;
     if (!lead) return;
     if (lead.clientId) { setView('clients'); renderDetail('client', lead.clientId); return; }
     const time = nowIso();
-    const client = { id: uid(), name: lead.name || '', company: lead.company || lead.name || '', phone: lead.phone || '', email: lead.email || '', island: lead.island || '', notes: lead.notes || '', createdAt: time, updatedAt: time, sourceLeadId: lead.id };
-    const work = createWork ? { id: uid(), name: lead.company ? 'Obra · ' + lead.company : 'Nueva obra · ' + lead.name, clientId: client.id, island: lead.island || '', status: 'Pendiente', budget: num(lead.value), progress: 0, notes: 'Creada desde el lead. Completa dirección, fechas y alcance.', createdAt: time, updatedAt: time, sourceLeadId: lead.id } : null;
+    const client = { id: uid(), name: lead.name || '', company: lead.company || lead.name || '', phone: lead.phone || '', email: lead.email || '', island: lead.island || '', address: lead.address || '', latitude: lead.latitude == null ? '' : lead.latitude, longitude: lead.longitude == null ? '' : lead.longitude, notes: lead.notes || '', createdAt: time, updatedAt: time, sourceLeadId: lead.id };
+    const work = createWork ? { id: uid(), name: lead.company ? 'Obra · ' + lead.company : 'Nueva obra · ' + lead.name, clientId: client.id, island: lead.island || '', address: lead.address || '', latitude: lead.latitude == null ? '' : lead.latitude, longitude: lead.longitude == null ? '' : lead.longitude, status: 'Pendiente', budget: num(lead.value), progress: 0, notes: 'Creada desde el lead. Completa dirección, fechas y alcance.', createdAt: time, updatedAt: time, sourceLeadId: lead.id } : null;
     if (!commitChange(() => {
       data.clients.unshift(client);
       if (work) data.works.unshift(work);
@@ -1056,7 +1148,7 @@ notify pgrst, 'reload schema';`;
   }
 
   function moveRecord(type, id, status) {
-    const record = type === 'lead' ? data.leads.find(item => item.id === id) : type === 'work' ? data.works.find(item => item.id === id) : null;
+    const record = type === 'lead' ? data.leads.find(item => item.id === id) : type === 'work' ? data.works.find(item => item.id === id) : type === 'task' ? data.tasks.find(item => item.id === id) : null;
     const allowed = STATUS[type];
     if (!record || !allowed || !allowed.includes(status)) return;
     const field = type === 'lead' ? 'stage' : 'status';
@@ -1068,7 +1160,7 @@ notify pgrst, 'reload schema';`;
       record.updatedAt = nowIso();
     })) {
       render();
-      toast((type === 'lead' ? 'Lead' : 'Obra') + ' movido a «' + status + '».', 'good');
+      toast((type === 'lead' ? 'Lead' : type === 'task' ? 'Tarea' : 'Obra') + ' movido a «' + status + '».', 'good');
     }
   }
 
@@ -1096,8 +1188,20 @@ notify pgrst, 'reload schema';`;
     }
     const client = preset.clientId ? data.clients.find(x => x.id === preset.clientId) : null;
     const work = preset.workId ? data.works.find(x => x.id === preset.workId) : null;
-    if (type === 'work' && client && !preset.island) preset.island = client.island || '';
-    if (type === 'event' && !preset.island) preset.island = work ? work.island || '' : client ? client.island || '' : '';
+    if (type === 'work' && client) {
+      preset.island = preset.island || client.island || '';
+      preset.address = preset.address || client.address || '';
+      preset.latitude = preset.latitude == null ? client.latitude == null ? '' : client.latitude : preset.latitude;
+      preset.longitude = preset.longitude == null ? client.longitude == null ? '' : client.longitude : preset.longitude;
+    }
+    if (type === 'event') {
+      const source = work || client;
+      if (work && !preset.clientId && work.clientId) preset.clientId = work.clientId;
+      preset.island = preset.island || (source && source.island) || '';
+      preset.address = preset.address || (source && source.address) || '';
+      preset.latitude = preset.latitude == null ? source && source.latitude != null ? source.latitude : '' : preset.latitude;
+      preset.longitude = preset.longitude == null ? source && source.longitude != null ? source.longitude : '' : preset.longitude;
+    }
     if (type === 'work' && client) preset.name = 'Obra · ' + (client.company || client.name);
     if (type === 'quote') preset.title = 'Presupuesto · ' + (work ? work.name : client ? (client.company || client.name) : '');
     if (type === 'task') preset.title = (work ? 'Trabajo · ' + work.name : client ? 'Tarea · ' + (client.company || client.name) : '');
@@ -1105,6 +1209,34 @@ notify pgrst, 'reload schema';`;
     if (type === 'document' && work) preset.title = 'Documento · ' + work.name;
     if (type === 'expense' && work) preset.title = 'Gasto de obra · ' + work.name;
     openForm(type, '', preset);
+  }
+
+  function inheritSiteFields(form, changedName) {
+    const type = form.dataset.type;
+    if (!['work', 'event'].includes(type)) return;
+    const clientSelect = $('[name="clientId"]', form);
+    const workSelect = $('[name="workId"]', form);
+    let relatedWork = workSelect && workSelect.value ? data.works.find(item => item.id === workSelect.value) : null;
+    if (type === 'event' && changedName === 'clientId' && relatedWork && relatedWork.clientId !== (clientSelect && clientSelect.value)) {
+      workSelect.value = '';
+      workSelect.dataset.inherited = 'true';
+      relatedWork = null;
+    }
+    if (type === 'event' && changedName === 'workId' && relatedWork && clientSelect) {
+      clientSelect.value = relatedWork.clientId || '';
+      clientSelect.dataset.inherited = 'true';
+    }
+    const relatedClientId = relatedWork && relatedWork.clientId || (clientSelect && clientSelect.value) || '';
+    const relatedClient = data.clients.find(item => item.id === relatedClientId);
+    const source = relatedWork || relatedClient;
+    if (!source) return;
+    ['island', 'address', 'latitude', 'longitude'].forEach(name => {
+      const input = $('[name="' + name + '"]', form);
+      if (!input || (input.value && input.dataset.inherited !== 'true')) return;
+      const value = source[name];
+      input.value = value == null ? '' : String(value);
+      input.dataset.inherited = 'true';
+    });
   }
 
   function quoteToInvoice(id) {
@@ -1387,6 +1519,7 @@ notify pgrst, 'reload schema';`;
   }
 
   document.addEventListener('click', (event) => {
+    if (Date.now() < suppressKanbanClickUntil && event.target.closest('.kanban-card')) { event.preventDefault(); event.stopImmediatePropagation(); return; }
     if (event.target.closest('.document-link')) return;
     if (!event.target.closest('.global-search')) closeGlobalSearch(false);
     const nav = event.target.closest('[data-view]');
@@ -1399,6 +1532,93 @@ notify pgrst, 'reload schema';`;
       handleAction(target);
     }
   });
+  document.addEventListener('dragstart', event => {
+    const card = event.target.closest && event.target.closest('[data-drag-type][data-drag-id]');
+    if (!card || !card.closest('.kanban-board')) return;
+    activeDrag = { type: card.dataset.dragType, id: card.dataset.dragId };
+    card.classList.add('is-dragging');
+    if (event.dataTransfer) {
+      event.dataTransfer.effectAllowed = 'move';
+      event.dataTransfer.setData('text/plain', card.dataset.dragType + '|' + card.dataset.dragId);
+    }
+  });
+  document.addEventListener('dragover', event => {
+    const column = event.target.closest && event.target.closest('[data-drop-type][data-drop-status]');
+    if (!column || !activeDrag || column.dataset.dropType !== activeDrag.type) return;
+    event.preventDefault();
+    if (event.dataTransfer) event.dataTransfer.dropEffect = 'move';
+    column.classList.add('is-drop-target');
+  });
+  document.addEventListener('dragleave', event => {
+    const column = event.target.closest && event.target.closest('[data-drop-type][data-drop-status]');
+    if (column && (!event.relatedTarget || !column.contains(event.relatedTarget))) column.classList.remove('is-drop-target');
+  });
+  document.addEventListener('drop', event => {
+    const column = event.target.closest && event.target.closest('[data-drop-type][data-drop-status]');
+    if (!column) return;
+    event.preventDefault();
+    column.classList.remove('is-drop-target');
+    const payload = event.dataTransfer && event.dataTransfer.getData('text/plain').split('|');
+    const dropped = activeDrag || (payload && payload.length === 2 ? { type: payload[0], id: payload[1] } : null);
+    activeDrag = null;
+    if (dropped && dropped.type === column.dataset.dropType) moveRecord(dropped.type, dropped.id, column.dataset.dropStatus);
+  });
+  document.addEventListener('dragend', event => {
+    const card = event.target.closest && event.target.closest('[data-drag-type][data-drag-id]');
+    if (card) card.classList.remove('is-dragging');
+    $$('.kanban-column.is-drop-target').forEach(column => column.classList.remove('is-drop-target'));
+    activeDrag = null;
+  });
+  document.addEventListener('pointerdown', event => {
+    if (event.pointerType !== 'touch' || !event.isPrimary) return;
+    const handle = event.target.closest && event.target.closest('.kanban-drag-handle');
+    const card = handle && handle.closest('.kanban-card[data-drag-type][data-drag-id]');
+    if (!card) return;
+    touchDrag = { card, pointerId: event.pointerId, startX: event.clientX, startY: event.clientY, type: card.dataset.dragType, id: card.dataset.dragId, started: false, column: null, ghost: null };
+    if (handle.setPointerCapture) handle.setPointerCapture(event.pointerId);
+  });
+  document.addEventListener('pointermove', event => {
+    if (!touchDrag || event.pointerId !== touchDrag.pointerId) return;
+    const deltaX = event.clientX - touchDrag.startX;
+    const deltaY = event.clientY - touchDrag.startY;
+    if (!touchDrag.started && Math.hypot(deltaX, deltaY) < 9) return;
+    if (!touchDrag.started) {
+      touchDrag.started = true;
+      touchDrag.card.classList.add('is-dragging');
+      const title = $('.kanban-card-open strong', touchDrag.card);
+      const ghost = document.createElement('div');
+      ghost.className = 'kanban-drag-ghost';
+      ghost.textContent = title ? title.textContent : 'Mover registro';
+      document.body.appendChild(ghost);
+      touchDrag.ghost = ghost;
+    }
+    if (event.cancelable) event.preventDefault();
+    if (touchDrag.ghost) { touchDrag.ghost.style.left = (event.clientX + 14) + 'px'; touchDrag.ghost.style.top = (event.clientY + 14) + 'px'; }
+    const element = document.elementFromPoint(event.clientX, event.clientY);
+    const column = element && element.closest('[data-drop-type][data-drop-status]');
+    if (touchDrag.column && touchDrag.column !== column) touchDrag.column.classList.remove('is-drop-target');
+    touchDrag.column = column && column.dataset.dropType === touchDrag.type ? column : null;
+    if (touchDrag.column) touchDrag.column.classList.add('is-drop-target');
+  }, { passive: false });
+  function finishTouchDrag(event, shouldMove) {
+    if (!touchDrag || (event && event.pointerId !== touchDrag.pointerId)) return;
+    const drag = touchDrag;
+    if (shouldMove && drag.started && event) {
+      const element = document.elementFromPoint(event.clientX, event.clientY);
+      const finalColumn = element && element.closest('[data-drop-type][data-drop-status]');
+      drag.column = finalColumn && finalColumn.dataset.dropType === drag.type ? finalColumn : null;
+    }
+    touchDrag = null;
+    if (drag.card) drag.card.classList.remove('is-dragging');
+    if (drag.column) drag.column.classList.remove('is-drop-target');
+    if (drag.ghost) drag.ghost.remove();
+    if (drag.started) {
+      suppressKanbanClickUntil = Date.now() + 550;
+      if (shouldMove && drag.column) moveRecord(drag.type, drag.id, drag.column.dataset.dropStatus);
+    }
+  }
+  document.addEventListener('pointerup', event => finishTouchDrag(event, true));
+  document.addEventListener('pointercancel', event => finishTouchDrag(event, false));
   document.addEventListener('submit', (event) => {
     if (event.target.id === 'entity-form') { event.preventDefault(); saveEntity(event.target); }
     else if (event.target.id === 'company-form') {
@@ -1427,6 +1647,7 @@ notify pgrst, 'reload schema';`;
       if (input) { input.focus(); input.setSelectionRange(caret, caret); }
     }
     if (event.target.matches('[data-quote-field="unit"]')) event.target.dataset.autoUnit = 'false';
+    if (event.target.form && event.target.form.id === 'entity-form' && ['address', 'latitude', 'longitude'].includes(event.target.name)) event.target.dataset.inherited = 'false';
     if (event.target.form && event.target.form.id === 'entity-form' && $('[data-quote-line-list]', event.target.form)) updateQuoteTotals(event.target.form);
   });
   document.addEventListener('change', (event) => {
@@ -1434,17 +1655,7 @@ notify pgrst, 'reload schema';`;
     if (event.target.id === 'island-filter') { islandFilter = event.target.value || 'all'; render(); }
     if (event.target.dataset.moveType) { moveRecord(event.target.dataset.moveType, event.target.dataset.id, event.target.value); return; }
     if (event.target.form && event.target.form.id === 'entity-form' && event.target.name === 'island') event.target.dataset.inherited = 'false';
-    if (event.target.form && event.target.form.id === 'entity-form' && ['clientId', 'workId'].includes(event.target.name)) {
-      const form = event.target.form;
-      const island = $('[name="island"]', form);
-      if (island && (!island.value || island.dataset.inherited === 'true')) {
-        const relatedWork = event.target.name === 'workId' ? data.works.find(item => item.id === event.target.value) : null;
-        const relatedClientId = event.target.name === 'clientId' ? event.target.value : (relatedWork && relatedWork.clientId) || $('[name="clientId"]', form)?.value;
-        const relatedClient = data.clients.find(item => item.id === relatedClientId);
-        const inheritedIsland = (relatedWork && relatedWork.island) || (relatedClient && relatedClient.island) || '';
-        if (inheritedIsland) { island.value = inheritedIsland; island.dataset.inherited = 'true'; }
-      }
-    }
+    if (event.target.form && event.target.form.id === 'entity-form' && ['clientId', 'workId'].includes(event.target.name)) inheritSiteFields(event.target.form, event.target.name);
     if (event.target.id === 'restore-input') restoreFile(event.target.files && event.target.files[0]);
     if (event.target.matches('[data-quote-field="category"]')) {
       const row = event.target.closest('.quote-line-card');
