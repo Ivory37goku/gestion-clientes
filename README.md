@@ -52,6 +52,8 @@ El APK tiene su propio identificador Android y carga Gestión Clientes. Puede
 abrir la versión publicada cuando está disponible y conserva los archivos locales
 para seguir trabajando sin conexión.
 
+Descarga directa de Android: [Gestión Clientes 1.0.9](https://ivory37goku.github.io/gestion-clientes/downloads/gestion-clientes-1.0.9.apk).
+
 ## Windows
 
 Con Node.js instalado, ejecuta npm install y npm run dist:win desde la raíz del
