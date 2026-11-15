@@ -315,6 +315,13 @@ notify pgrst, 'reload schema';`;
     setTimeout(() => node.remove(), 3400);
   }
 
+  function updateNavigationState() {
+    const brandSettingsOpen = view === 'settings' && settingsTab === 'marca';
+    $$('.nav-item').forEach(button => button.classList.toggle('active', brandSettingsOpen
+      ? button.dataset.action === 'settings-tab' && button.dataset.tab === 'marca'
+      : button.dataset.view === view));
+  }
+
   function setView(next) {
     view = next;
     searchText = '';
@@ -322,7 +329,7 @@ notify pgrst, 'reload schema';`;
     islandFilter = 'all';
     if (next === 'myday') myDayDate = today;
     closeGlobalSearch(true);
-    $$('.nav-item').forEach(b => b.classList.toggle('active', b.dataset.view === view));
+    updateNavigationState();
     $('#crumb-title').textContent = TITLES[view] || 'Resumen';
     $('#sidebar').classList.remove('open');
     render();
@@ -2694,7 +2701,7 @@ notify pgrst, 'reload schema';`;
       return;
     }
     if (action === 'toggle-view-mode') { const key = target.dataset.listKey; if (key && viewModes[key]) { viewModes[key] = target.dataset.viewMode === 'board' ? 'board' : 'list'; render(); } return; }
-    if (action === 'settings-tab') { settingsTab = target.dataset.tab || 'empresa'; if (view !== 'settings') { setView('settings'); return; } render(); return; }
+    if (action === 'settings-tab') { settingsTab = target.dataset.tab || 'empresa'; if (view !== 'settings') { setView('settings'); return; } updateNavigationState(); render(); return; }
     if (action === 'myday-shift') { const d = new Date((myDayDate || today) + 'T12:00:00'); d.setDate(d.getDate() + Number(target.dataset.delta || 0)); myDayDate = dateKey(d); render(); return; }
     if (action === 'myday-today') { myDayDate = today; render(); return; }
     if (action === 'month-shift') { const d = new Date(agendaMonth + '-01T12:00:00'); d.setMonth(d.getMonth() + Number(target.dataset.delta || 0)); agendaMonth = dateKey(d).slice(0, 7); render(); return; }
