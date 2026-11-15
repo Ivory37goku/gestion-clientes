@@ -62,6 +62,8 @@ La paleta y el icono están en **Ajustes → Marca**. El icono compacto se muest
 
 En Android, descarga el APK e instálalo desde el dispositivo. En Windows, abre la última ejecución correcta del workflow y descarga el artefacto `gestion-clientes-windows`, que contiene el instalador y la versión portable. La PWA también se puede añadir a la pantalla de inicio desde el navegador.
 
+La app busca actualizaciones automáticamente y las aplica cuando no hay cambios pendientes en los formularios.
+
 ## Sincronización privada
 
 En **Ajustes → Datos y nube**, inicia sesión con la misma cuenta que usas en Control Laboral. Ejecuta una vez el archivo SQL que proporciona la app para crear la tabla privada `public.gestion_clientes` en tu proyecto Supabase.
