@@ -43,6 +43,7 @@ create policy "Users can update their own Gestión Clientes data"
 -- Actualiza la caché de esquema de PostgREST inmediatamente.
 notify pgrst, 'reload schema';`;
   const COLLECTIONS = ['leads', 'clients', 'works', 'tasks', 'quotes', 'invoices', 'payments', 'expenses', 'events', 'documents', 'team'];
+  const ACTIVITY_TYPES = ['Llamada', 'WhatsApp', 'Correo', 'Visita', 'Reunión', 'Nota'];
   const CANARY_ISLANDS = ['Gran Canaria', 'Tenerife', 'Lanzarote', 'Fuerteventura', 'La Palma', 'La Gomera', 'El Hierro', 'La Graciosa'];
   const GRAFCAN_CONFIG_URL = 'https://www.grafcan.es/files/wmsjson/callejero_v10.json';
   const ISLAND_CENTERS = {
@@ -748,8 +749,11 @@ notify pgrst, 'reload schema';`;
     const mapActions = '<div class="location-actions">' + (address || coords ? '<a class="btn btn-primary btn-sm" href="' + esc(directionsUrl(mapRecord, address, island)) + '" target="_blank" rel="noopener">' + directionsLabel + '</a>' : '<span class="muted small">Añade la dirección o las coordenadas para abrir una ruta.</span>') + '<a class="btn btn-sm" href="' + esc(grafcanViewerUrl(mapRecord, island)) + '" target="_blank" rel="noopener">Abrir GRAFCAN ↗</a>' + (client && client.phone ? '<a class="btn btn-sm" href="tel:' + esc(client.phone.replace(/[^\d+]/g, '')) + '">Llamar</a>' : '') + (client && client.phone && whatsappUrl(client.phone, message) ? '<a class="btn btn-sm" href="' + esc(whatsappUrl(client.phone, message)) + '" target="_blank" rel="noopener">' + notifyLabel + ' por WhatsApp</a>' : '') + (client && client.email ? '<a class="btn btn-sm" href="mailto:' + esc(client.email) + '?subject=' + encodeURIComponent(isVisit ? 'Visita · ' + (item.title || destination) : isLead ? 'Coordinar visita · ' + (item.company || item.name || destination) : 'Llegada · ' + (item.name || destination)) + '&body=' + encodeURIComponent(message) + '">Correo</a>' : '') + '</div>';
     const locationText = [address, island, coords ? coords[0].toFixed(6) + ', ' + coords[1].toFixed(6) : ''].filter(Boolean).join(' · ');
     const note = coords ? 'Punto guardado en la ficha.' : island ? 'Mapa centrado en ' + island + '. Guarda las coordenadas para fijar el punto exacto.' : 'Completa la dirección o la isla para localizar el sitio.';
-    const leadSyncNote = isLead && item.clientId ? ' Al guardar cambios en este lead, la ubicación se copia al cliente y a la obra asociados si todavía no tienen una ubicación propia.' : '';
-    return '<section class="location-panel"><div class="location-panel-head"><div><p class="eyebrow">UBICACIÓN Y CONTACTO</p><h3>' + esc(destination) + '</h3><p>' + esc(locationText || note) + '</p></div>' + (client ? '<span class="badge">' + esc(client.company || client.name || 'Cliente') + '</span>' : '') + '</div>' + mapActions + '<iframe class="grafcan-frame" src="' + esc(grafcanViewerUrl(mapRecord, island)) + '" title="Mapa de GRAFCAN · ' + esc(destination) + '" loading="lazy" referrerpolicy="strict-origin-when-cross-origin" allowfullscreen></iframe><p class="location-note">' + esc(note) + ' Los enlaces de ruta y aviso se abren en la aplicación correspondiente; el WhatsApp queda preparado para que lo revises y lo envíes.' + esc(leadSyncNote) + '</p></section>';
+    const leadTargets = isLead ? leadLocationTargets(item) : null;
+    const leadSyncAction = isLead && leadTargets && leadTargets.related.length && [item.island, item.address, item.latitude, item.longitude].some(value => value != null && value !== '')
+      ? '<button type="button" class="btn btn-sm" data-action="sync-lead-location" data-id="' + esc(item.id) + '">Copiar ubicación a cliente y obras</button>' : '';
+    const leadSyncNote = isLead && leadTargets && leadTargets.related.length ? ' Puedes copiar ahora esta ubicación al cliente y a sus obras vinculadas desde el botón anterior.' : '';
+    return '<section class="location-panel"><div class="location-panel-head"><div><p class="eyebrow">UBICACIÓN Y CONTACTO</p><h3>' + esc(destination) + '</h3><p>' + esc(locationText || note) + '</p></div>' + (client ? '<span class="badge">' + esc(client.company || client.name || 'Cliente') + '</span>' : '') + '</div>' + mapActions + (leadSyncAction ? '<div class="location-actions location-sync-actions">' + leadSyncAction + '</div>' : '') + '<iframe class="grafcan-frame" src="' + esc(grafcanViewerUrl(mapRecord, island)) + '" title="Mapa de GRAFCAN · ' + esc(destination) + '" loading="lazy" referrerpolicy="strict-origin-when-cross-origin" allowfullscreen></iframe><p class="location-note">' + esc(note) + ' Los enlaces de ruta y aviso se abren en la aplicación correspondiente; el WhatsApp queda preparado para que lo revises y lo envíes.' + esc(leadSyncNote) + '</p></section>';
   }
 
   function workQuickActions(work) {
@@ -836,6 +840,144 @@ notify pgrst, 'reload schema';`;
     return groups ? '<div class="relationships"><div class="relationships-heading"><div><p class="eyebrow">HISTORIAL RELACIONADO</p><h3>' + (type === 'client' ? 'Actividad del cliente' : 'Actividad de la obra') + '</h3></div></div><div class="relationship-grid">' + groups + '</div></div>' : '';
   }
 
+  function activityContext(type, item) {
+    const client = type === 'client' ? item : type === 'work' ? data.clients.find(row => row.id === item.clientId) : null;
+    const lead = type === 'lead' ? item : data.leads.find(row => row.id === (item.sourceLeadId || (client && client.sourceLeadId) || ''));
+    return {
+      type,
+      id: item.id,
+      leadId: lead ? lead.id : type === 'lead' ? item.id : '',
+      clientId: type === 'client' ? item.id : type === 'work' ? item.clientId || '' : item.clientId || (lead && lead.clientId) || '',
+      workId: type === 'work' ? item.id : type === 'lead' ? item.workId || '' : '',
+      ownerType: type,
+      ownerId: item.id
+    };
+  }
+
+  function findActivity(id) {
+    for (const [type, collection] of [['lead', 'leads'], ['client', 'clients'], ['work', 'works']]) {
+      for (const record of data[collection]) {
+        const activity = (record.activityLog || []).find(row => row.id === id);
+        if (activity) return { activity, record, ownerType: type, ownerId: record.id };
+      }
+    }
+    return null;
+  }
+
+  function activitiesFor(type, item) {
+    const sources = [{ type, record: item }];
+    if (type === 'lead') {
+      const client = data.clients.find(row => row.id === item.clientId) || data.clients.find(row => row.sourceLeadId === item.id);
+      if (client) sources.push({ type: 'client', record: client });
+      data.works.filter(work => work.id === item.workId || work.sourceLeadId === item.id || (client && work.clientId === client.id)).forEach(record => sources.push({ type: 'work', record }));
+    }
+    if (type === 'client') {
+      data.works.filter(work => work.clientId === item.id).forEach(record => sources.push({ type: 'work', record }));
+      data.leads.filter(lead => lead.clientId === item.id || (item.sourceLeadId && lead.id === item.sourceLeadId)).forEach(record => sources.push({ type: 'lead', record }));
+    }
+    if (type === 'work') {
+      const client = data.clients.find(row => row.id === item.clientId);
+      if (client) sources.push({ type: 'client', record: client });
+      data.leads.filter(lead => lead.workId === item.id || (client && lead.clientId === client.id) || (item.sourceLeadId && lead.id === item.sourceLeadId)).forEach(record => sources.push({ type: 'lead', record }));
+    }
+    const found = new Map();
+    sources.forEach(source => (source.record.activityLog || []).forEach(activity => {
+      if (!found.has(activity.id)) found.set(activity.id, Object.assign({}, activity, { activityOwnerType: source.type, activityOwnerId: source.record.id }));
+    }));
+    return Array.from(found.values()).sort((a, b) => String(b.date || b.createdAt || '').localeCompare(String(a.date || a.createdAt || '')) || String(b.createdAt || '').localeCompare(String(a.createdAt || '')));
+  }
+
+  function activityTimeline(type, item) {
+    if (!['lead', 'client', 'work'].includes(type)) return '';
+    const context = activityContext(type, item);
+    const activities = activitiesFor(type, item);
+    const icons = { Llamada: '☎', WhatsApp: '◉', Correo: '✉', Visita: '⌖', Reunión: '◷', Nota: '✎' };
+    const rows = activities.length ? activities.map(activity => '<article class="activity-entry"><span class="activity-mark" aria-hidden="true">' + (icons[activity.kind] || '•') + '</span><div class="activity-entry-main"><div class="activity-meta"><strong>' + esc(activity.kind || 'Nota') + '</strong><time datetime="' + esc(activity.date || '') + '">' + esc(dateFmt(activity.date) + (activity.time ? ' · ' + activity.time : '')) + '</time></div><p>' + esc(activity.summary || '') + '</p>' + (activity.nextDate ? '<small class="activity-followup">Próximo seguimiento · ' + esc(dateFmt(activity.nextDate)) + '</small>' : '') + '</div><div class="activity-entry-actions"><button type="button" class="tiny-btn" data-action="edit-activity" data-id="' + esc(activity.id) + '" aria-label="Editar actividad">Editar</button><button type="button" class="tiny-btn danger" data-action="delete-activity" data-id="' + esc(activity.id) + '" aria-label="Eliminar actividad">×</button></div></article>').join('') : '<div class="activity-empty"><strong>Aún no hay contactos registrados</strong><p>Guarda aquí llamadas, WhatsApp, correos, visitas y notas para que el equipo conozca el historial.</p></div>';
+    return '<section class="activity-panel"><div class="activity-panel-head"><div><p class="eyebrow">SEGUIMIENTO COMERCIAL</p><h3>Historial de contactos</h3><p>Un registro compartido de lo hablado y el siguiente paso.</p></div><button type="button" class="btn btn-primary btn-sm" data-action="new-activity" data-type="' + esc(context.type) + '" data-id="' + esc(context.id) + '">＋ Registrar contacto</button></div><div class="activity-list">' + rows + '</div></section>';
+  }
+
+  function openActivityForm(type, contextId, activityId) {
+    const found = activityId ? findActivity(activityId) : null;
+    const existing = found && found.activity;
+    const record = existing ? null : (type === 'lead' ? data.leads.find(row => row.id === contextId) : type === 'client' ? data.clients.find(row => row.id === contextId) : data.works.find(row => row.id === contextId));
+    const context = existing ? { type: existing.contextType || type || 'lead', id: existing.contextId || contextId || '', leadId: existing.leadId || '', clientId: existing.clientId || '', workId: existing.workId || '', ownerType: found.ownerType, ownerId: found.ownerId } : record ? activityContext(type, record) : null;
+    if (!context) return;
+    const item = existing || { kind: 'Llamada', date: today, time: '', summary: '', nextDate: '' };
+    const select = ACTIVITY_TYPES.map(kind => '<option value="' + esc(kind) + '"' + (kind === item.kind ? ' selected' : '') + '>' + esc(kind) + '</option>').join('');
+    const modal = '<div class="modal-backdrop" data-action="backdrop"><section class="modal activity-modal" role="dialog" aria-modal="true" aria-labelledby="activity-title"><div class="modal-head"><h2 id="activity-title">' + (existing ? 'Editar contacto' : 'Registrar contacto') + '</h2><button type="button" class="close-btn" data-action="close-modal" aria-label="Cerrar">×</button></div><form id="activity-form" data-id="' + esc(existing ? existing.id : '') + '" data-context-type="' + esc(context.type) + '" data-context-id="' + esc(context.id) + '" data-lead-id="' + esc(context.leadId) + '" data-client-id="' + esc(context.clientId) + '" data-work-id="' + esc(context.workId) + '" data-owner-type="' + esc(context.ownerType) + '" data-owner-id="' + esc(context.ownerId) + '"><div class="modal-body"><p class="modal-note">Este contacto quedará guardado en el historial de la ficha y sincronizado con tus dispositivos.</p><div class="fields"><div class="field"><label for="activity-kind">Tipo de contacto</label><select id="activity-kind" name="kind" required>' + select + '</select></div><div class="field"><label for="activity-date">Fecha</label><input id="activity-date" name="date" type="date" value="' + esc(item.date || today) + '" required></div><div class="field"><label for="activity-time">Hora (opcional)</label><input id="activity-time" name="time" type="time" value="' + esc(item.time || '') + '"></div><div class="field"><label for="activity-next-date">Próximo seguimiento</label><input id="activity-next-date" name="nextDate" type="date" value="' + esc(item.nextDate || '') + '"><span class="hint">La fecha queda visible en el historial y actualiza el seguimiento del lead.</span></div><div class="field full"><label for="activity-summary">Resumen de la conversación</label><textarea id="activity-summary" name="summary" rows="4" maxlength="1200" required placeholder="Qué se habló, qué pidió el cliente y qué acordaron…">' + esc(item.summary || '') + '</textarea></div></div></div><div class="modal-foot"><span></span><div><button type="button" class="btn" data-action="close-modal">Cancelar</button><button type="submit" class="btn btn-primary">Guardar contacto</button></div></div></form></section></div>';
+    $('#modal-root').innerHTML = modal;
+    const summary = $('#activity-summary');
+    if (!existing && summary) setTimeout(() => summary.focus(), 30);
+  }
+
+  function saveActivity(form) {
+    const id = form.dataset.id;
+    const found = id ? findActivity(id) : null;
+    const existing = found && found.activity;
+    const values = Object.fromEntries(new FormData(form).entries());
+    values.kind = ACTIVITY_TYPES.includes(values.kind) ? values.kind : 'Nota';
+    values.date = String(values.date || '').trim();
+    values.time = String(values.time || '').trim();
+    values.summary = String(values.summary || '').trim();
+    values.nextDate = String(values.nextDate || '').trim();
+    if (!/^\d{4}-\d{2}-\d{2}$/.test(values.date) || Number.isNaN(new Date(values.date + 'T12:00:00').getTime())) return toast('Indica una fecha válida para el contacto.', 'bad');
+    if (values.nextDate && (!/^\d{4}-\d{2}-\d{2}$/.test(values.nextDate) || Number.isNaN(new Date(values.nextDate + 'T12:00:00').getTime()))) return toast('La fecha del próximo seguimiento no es válida.', 'bad');
+    if (!values.summary) return toast('Escribe un breve resumen de lo hablado.', 'bad');
+    const time = nowIso();
+    if (values.nextDate && values.nextDate < values.date) return toast('El próximo seguimiento debe ser el mismo día o posterior al contacto.', 'bad');
+    const ownerType = form.dataset.ownerType;
+    const ownerCollection = ownerType === 'lead' ? 'leads' : ownerType === 'client' ? 'clients' : ownerType === 'work' ? 'works' : '';
+    const ownerId = form.dataset.ownerId;
+    const ownerRecord = ownerCollection && data[ownerCollection].find(row => row.id === ownerId);
+    if (!ownerRecord) return toast('No se encontró la ficha donde guardar el contacto. Vuelve a abrirla e inténtalo de nuevo.', 'bad');
+    const entry = Object.assign({}, existing || {}, values, { id: existing ? existing.id : uid(), leadId: form.dataset.leadId || '', clientId: form.dataset.clientId || '', workId: form.dataset.workId || '', contextType: form.dataset.contextType || '', contextId: form.dataset.contextId || '', activityOwnerType: ownerType, activityOwnerId: ownerId, createdAt: existing ? existing.createdAt : time, updatedAt: time });
+    const contextLead = entry.leadId && data.leads.find(row => row.id === entry.leadId);
+    const generatedTasks = [];
+    let taskUpdated = false;
+    let syncedLead = false;
+    if (!commitChange(() => {
+      ownerRecord.activityLog = Array.isArray(ownerRecord.activityLog) ? ownerRecord.activityLog : [];
+      if (existing) {
+        const index = ownerRecord.activityLog.findIndex(row => row.id === existing.id);
+        if (index < 0) ownerRecord.activityLog.unshift(entry); else ownerRecord.activityLog[index] = entry;
+      } else ownerRecord.activityLog.unshift(entry);
+      ownerRecord.updatedAt = time;
+      if (contextLead) {
+        if (entry.nextDate) { contextLead.nextDate = entry.nextDate; contextLead.updatedAt = time; syncedLead = true; }
+        else if (existing && existing.nextDate && contextLead.nextDate === existing.nextDate) { contextLead.nextDate = ''; contextLead.updatedAt = time; syncedLead = true; }
+      }
+      if (entry.nextDate && (entry.contextType !== 'lead' || entry.clientId || entry.workId)) {
+        const relatedTask = data.tasks.find(task => task.sourceActivityId === entry.id && isTaskOpen(task));
+        const taskValues = { title: 'Seguimiento · ' + (entry.kind || 'Contacto'), clientId: entry.clientId || '', workId: entry.workId || '', due: entry.nextDate, category: 'General', priority: 'Media', status: 'Pendiente', description: 'Seguimiento generado desde el historial: ' + entry.summary, sourceActivityId: entry.id, updatedAt: time };
+        if (relatedTask) { Object.assign(relatedTask, taskValues); taskUpdated = true; }
+        else { const task = Object.assign({ id: uid(), createdAt: time }, taskValues); data.tasks.unshift(task); generatedTasks.push(task); }
+      } else if (!entry.nextDate && existing) {
+        const relatedTask = data.tasks.find(task => task.sourceActivityId === entry.id && isTaskOpen(task));
+        if (relatedTask) { relatedTask.status = 'Cancelada'; relatedTask.updatedAt = time; }
+      }
+    })) return;
+    $('#modal-root').innerHTML = '';
+    renderDetail(entry.contextType, entry.contextId);
+    toast((existing ? 'Contacto actualizado' : 'Contacto guardado') + (generatedTasks.length ? ' y tarea de seguimiento creada' : taskUpdated ? ' y tarea de seguimiento actualizada' : '') + (syncedLead ? '; seguimiento del lead actualizado' : '') + '.', 'good');
+  }
+
+  function deleteActivity(id) {
+    const found = findActivity(id);
+    const entry = found && found.activity;
+    if (!entry || !confirm('¿Eliminar este contacto del historial?')) return;
+    const time = nowIso();
+    if (!commitChange(() => {
+      found.record.activityLog = (found.record.activityLog || []).filter(row => row.id !== id);
+      found.record.updatedAt = time;
+      const lead = entry.leadId && data.leads.find(row => row.id === entry.leadId);
+      if (lead && entry.nextDate && lead.nextDate === entry.nextDate) { lead.nextDate = ''; lead.updatedAt = time; }
+      const task = data.tasks.find(row => row.sourceActivityId === id && isTaskOpen(row));
+      if (task) { task.status = 'Cancelada'; task.updatedAt = time; }
+    })) return;
+    if (entry.contextType && entry.contextId) renderDetail(entry.contextType, entry.contextId); else render();
+    toast('Contacto eliminado del historial.', 'good');
+  }
+
   function openConvertLead(id) {
     const lead = data.leads.find(x => x.id === id);
     if (!lead) return;
@@ -868,8 +1010,9 @@ notify pgrst, 'reload schema';`;
     const breakdown = ['quote', 'invoice'].includes(type) && Array.isArray(item.items) && item.items.length ? quoteBreakdown(item) : '';
     const processPanel = type === 'lead' ? leadProcessPanel(item) : ['client', 'work'].includes(type) ? clientWorkProcessPanel(type, item, id) : '';
     const locationPanel = renderLocationPanel(type, item);
+    const activityPanel = activityTimeline(type, item);
     const relationships = renderRelationships(type, item, id);
-    const modal = '<div class="modal-backdrop" data-action="backdrop"><section class="modal" role="dialog" aria-modal="true" aria-labelledby="detail-title"><div class="modal-head"><h2 id="detail-title">' + esc(title) + '</h2><button type="button" class="close-btn" data-action="close-modal" aria-label="Cerrar">×</button></div><div class="modal-body">' + processPanel + locationPanel + '<div class="list">' + facts.join('') + '</div>' + breakdown + relationships + '</div><div class="modal-foot"><div>' + extraActions + '</div><div><button type="button" class="btn btn-danger btn-sm" data-action="delete" data-type="' + type + '" data-id="' + esc(id) + '">Eliminar</button><button type="button" class="btn btn-primary btn-sm" data-action="edit" data-type="' + type + '" data-id="' + esc(id) + '">Editar</button></div></div></section></div>';
+    const modal = '<div class="modal-backdrop" data-action="backdrop"><section class="modal" role="dialog" aria-modal="true" aria-labelledby="detail-title"><div class="modal-head"><h2 id="detail-title">' + esc(title) + '</h2><button type="button" class="close-btn" data-action="close-modal" aria-label="Cerrar">×</button></div><div class="modal-body">' + processPanel + activityPanel + locationPanel + '<div class="list">' + facts.join('') + '</div>' + breakdown + relationships + '</div><div class="modal-foot"><div>' + extraActions + '</div><div><button type="button" class="btn btn-danger btn-sm" data-action="delete" data-type="' + type + '" data-id="' + esc(id) + '">Eliminar</button><button type="button" class="btn btn-primary btn-sm" data-action="edit" data-type="' + type + '" data-id="' + esc(id) + '">Editar</button></div></div></section></div>';
     $('#modal-root').innerHTML = modal;
   }
 
@@ -1063,18 +1206,25 @@ notify pgrst, 'reload schema';`;
     }
     return String(left == null ? '' : left).trim() === String(right == null ? '' : right).trim();
   }
-  function syncLeadLocation(lead, previous, time) {
-    if (!previous || !lead) return 0;
-    const client = data.clients.find(item => item.id === lead.clientId || item.sourceLeadId === lead.id);
-    const works = data.works.filter(item => item.id === lead.workId || item.sourceLeadId === lead.id);
+  function leadLocationTargets(lead) {
+    if (!lead) return { client: null, works: [], related: [] };
+    const client = data.clients.find(item => item.id === lead.clientId) || data.clients.find(item => item.sourceLeadId === lead.id) || null;
+    const works = data.works.filter(item => item.id === lead.workId || item.sourceLeadId === lead.id || (client && item.clientId === client.id));
     const related = (client ? [client] : []).concat(works);
+    return { client, works, related: Array.from(new Map(related.map(item => [item.id, item])).values()) };
+  }
+  function syncLeadLocation(lead, previous, time, force) {
+    if (!lead || (!previous && !force)) return 0;
+    const related = leadLocationTargets(lead).related;
     let changedRecords = 0;
     related.forEach(record => {
       let changed = false;
       ['island', 'address', 'latitude', 'longitude'].forEach(field => {
         const recordIsBlank = record[field] == null || record[field] === '';
-        if (!recordIsBlank && !sameLocationValue(field, record[field], previous[field])) return;
         const nextValue = lead[field] == null ? '' : lead[field];
+        if (force) {
+          if (nextValue === '') return;
+        } else if (!recordIsBlank && !sameLocationValue(field, record[field], previous[field])) return;
         if (sameLocationValue(field, record[field], nextValue)) return;
         record[field] = nextValue;
         changed = true;
@@ -1082,6 +1232,16 @@ notify pgrst, 'reload schema';`;
       if (changed) { record.updatedAt = time; changedRecords++; }
     });
     return changedRecords;
+  }
+  function syncLeadLocationNow(id) {
+    const lead = data.leads.find(item => item.id === id);
+    if (!lead) return;
+    const targets = leadLocationTargets(lead);
+    if (!targets.related.length) return toast('Este lead aún no está vinculado a un cliente u obra.', 'bad');
+    let changed = 0;
+    if (!commitChange(() => { changed = syncLeadLocation(lead, null, nowIso(), true); })) return;
+    renderDetail('lead', id);
+    toast(changed ? 'Ubicación copiada a ' + changed + (changed === 1 ? ' ficha vinculada.' : ' fichas vinculadas.') : 'El cliente y las obras ya tenían esta ubicación.', 'good');
   }
   function saveEntity(form) {
     const type = form.dataset.type;
@@ -1485,6 +1645,7 @@ notify pgrst, 'reload schema';`;
       if (k === 'clientId') return csvEscape(selected(data.clients, x[k]));
       if (k === 'workId') return csvEscape(workName(x[k]));
       if (k === 'owner') return csvEscape(teamName(x[k]));
+      if (k === 'activityLog') return csvEscape(JSON.stringify(x[k] || []));
       return csvEscape(x[k]);
     }).join(';'))).join('\r\n');
   }
@@ -1531,6 +1692,10 @@ notify pgrst, 'reload schema';`;
     if (action === 'convert-lead-finish') { convertLead(target.dataset.id, target.dataset.createWork === 'true'); return; }
     if (action === 'advance-lead') { advanceLead(target.dataset.id); return; }
     if (action === 'reopen-lead') { updateLeadStage(target.dataset.id, 'Nuevo'); return; }
+    if (action === 'new-activity') { openActivityForm(target.dataset.type, target.dataset.id); return; }
+    if (action === 'edit-activity') { openActivityForm('', '', target.dataset.id); return; }
+    if (action === 'delete-activity') { deleteActivity(target.dataset.id); return; }
+    if (action === 'sync-lead-location') { syncLeadLocationNow(target.dataset.id); return; }
     if (action === 'quote-to-invoice') { quoteToInvoice(target.dataset.id); return; }
     if (action === 'payment') { openPayment(target.dataset.id); return; }
     if (action === 'toggle-task') {
@@ -1660,6 +1825,7 @@ notify pgrst, 'reload schema';`;
   document.addEventListener('pointercancel', event => finishTouchDrag(event, false));
   document.addEventListener('submit', (event) => {
     if (event.target.id === 'entity-form') { event.preventDefault(); saveEntity(event.target); }
+    else if (event.target.id === 'activity-form') { event.preventDefault(); saveActivity(event.target); }
     else if (event.target.id === 'company-form') {
       event.preventDefault();
       const companyValues = {};

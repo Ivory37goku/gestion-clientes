@@ -11,8 +11,10 @@ Laboral, pero conserva sus registros en una tabla separada.
 - Tableros Kanban para leads, tareas y obras, con cambio de fase desde cada tarjeta y alternativa en lista.
 - Segmentación de leads, clientes y obras por isla canaria, heredada automáticamente al convertir contactos o crear visitas y proyectos relacionados.
 - Flujo guiado de lead a cliente, obra, presupuesto y factura; acciones rápidas con el cliente y la obra ya vinculados.
+- Historial de llamadas, WhatsApp, correos, visitas y notas dentro de cada lead, cliente u obra, con tareas de seguimiento.
 - Clientes convertibles desde un lead y con varias obras asociadas.
 - Obras con fechas, presupuesto, estado, avance y responsable.
+- Ubicación heredada del lead al cliente y sus obras, con acción visible para actualizar fichas vinculadas.
 - Tareas por obra o cliente, con prioridades y vencimientos.
 - Estados de tarea diferenciados: pendiente, en curso, en espera, en revisión, hecha y cancelada; las tareas cerradas dejan de contar como abiertas o vencidas.
 - Mi día con navegación por fecha y resumen de tareas, visitas y seguimientos; incidencias, mantenimiento y checklists organizados sobre las tareas existentes.
