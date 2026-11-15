@@ -1666,7 +1666,7 @@ notify pgrst, 'reload schema';`;
     const personalCount = (data.company.quoteCatalog || []).length;
     return '<section class="quote-catalog" aria-label="Catálogo fotovoltaico de partidas"><div class="quote-catalog-head"><div><p class="eyebrow">CATÁLOGO FOTOVOLTAICO</p><strong>Partidas preparadas para tus presupuestos</strong><p>Selecciona productos sueltos o genera un desglose inicial desde los kWp de PVGIS. Tus partidas guardadas quedan en tu cuenta.</p></div><span class="quote-catalog-count">' + (SOLAR_QUOTE_CATALOG.length + personalCount) + ' partidas</span></div>' +
       '<div class="solar-bundle-tools"><div><p class="eyebrow">GENERADOR DE DESGLOSE</p><strong>Prepara un presupuesto solar en un clic</strong><p>Usa la potencia del estudio PVGIS asociado a la obra. Si no hay estudio, parte de 5 kWp. Las cantidades se pueden cambiar.</p></div><div class="solar-bundle-fields"><div class="field"><label>Potencia FV (kWp)</label><input type="number" min="1" max="20" step="0.1" value="' + esc(initialPower) + '" data-solar-bundle-power></div><div class="field"><label>Inversor</label><select data-solar-bundle-inverter><option value="hybrid" selected>Híbrido (preparado para batería)</option><option value="string">String (sin batería)</option></select></div><div class="field"><label>Cubierta</label><select data-solar-bundle-roof><option value="tile" selected>Teja</option><option value="flat">Plana lastrada</option><option value="sheet">Chapa / sándwich</option><option value="slate">Pizarra / teja especial</option><option value="carport">Pérgola / marquesina</option></select></div><div class="field"><label>Batería</label><select data-solar-bundle-battery><option value="0" selected>Sin batería</option><option value="5">5 kWh</option><option value="10">10 kWh</option><option value="15">15 kWh</option></select></div></div><button type="button" class="btn btn-primary btn-sm" data-action="add-solar-quote-bundle">＋ Añadir desglose FV sugerido</button></div>' +
-      '<div class="quote-catalog-tools"><div class="field"><label for="quote-catalog-search">Buscar partidas</label><input id="quote-catalog-search" type="search" data-catalog-search placeholder="Panel, inversor, batería, cable, hora, IGIC…" autocomplete="off"></div><div class="field"><label for="quote-catalog-group">Ver por grupo</label><select id="quote-catalog-group" data-catalog-group><option value="todas" selected>Todo el catálogo (' + (SOLAR_QUOTE_CATALOG.length + personalCount) + ')</option><option value="frecuentes">Más utilizadas</option><option value="kits">Kits llave en mano</option><option value="modulos">Paneles</option><option value="inversores">Inversores y optimizadores</option><option value="baterias">Baterías y almacenamiento</option><option value="estructuras">Estructuras y cubiertas</option><option value="electricos">Cableado, cuadros y protecciones</option><option value="equipos">Cargadores y gestión energética</option><option value="montaje">Mano de obra y medios auxiliares</option><option value="gestion">Desplazamientos y trámites</option><option value="mantenimiento">Mantenimiento y postventa</option><option value="personal">Mis partidas guardadas (' + personalCount + ')</option></select></div></div><p class="quote-catalog-warning" data-catalog-warning hidden>Este pack llave en mano incluye el suministro y los trabajos habituales. No lo combines con esas mismas partidas desglosadas.</p><div class="quote-catalog-results" data-catalog-results></div><div class="quote-catalog-footer">Referencias: <a href="' + esc(SOLAR_PRICE_SOURCES.canary.url) + '" target="_blank" rel="noopener">precios residenciales publicados en Canarias</a>, <a href="' + esc(SOLAR_PRICE_SOURCES.market.url) + '" target="_blank" rel="noopener">desglose fotovoltaico 2026</a>, <a href="' + esc(SOLAR_PRICE_SOURCES.preoc.url) + '" target="_blank" rel="noopener">PREOC 2026</a> y <a href="' + esc(SOLAR_PRICE_SOURCES.cype.url) + '" target="_blank" rel="noopener">CYPE</a>. Precios editables de referencia; comprueba stock, envío interinsular, alcance e IGIC antes de enviar. Las cantidades sugeridas no sustituyen el replanteo ni el cálculo eléctrico.</div></section>';
+      '<div class="quote-catalog-tools"><div class="field"><label for="quote-catalog-search">Buscar partidas</label><input id="quote-catalog-search" type="search" data-catalog-search placeholder="Panel, inversor, batería, cable, hora, IGIC…" autocomplete="off"></div><div class="field"><label for="quote-catalog-group">Ver por grupo</label><select id="quote-catalog-group" data-catalog-group><option value="todas" selected>Todo el catálogo (' + (SOLAR_QUOTE_CATALOG.length + personalCount) + ')</option><option value="frecuentes">Más utilizadas</option><option value="kits">Kits llave en mano</option><option value="modulos">Paneles</option><option value="inversores">Inversores y optimizadores</option><option value="baterias">Baterías y almacenamiento</option><option value="estructuras">Estructuras y cubiertas</option><option value="electricos">Cableado, cuadros y protecciones</option><option value="equipos">Cargadores y gestión energética</option><option value="montaje">Mano de obra y medios auxiliares</option><option value="gestion">Desplazamientos y trámites</option><option value="mantenimiento">Mantenimiento y postventa</option><option value="personal">Mis partidas guardadas (' + personalCount + ')</option></select></div></div><div class="quote-catalog-status"><strong data-catalog-result-count role="status" aria-live="polite"></strong><button type="button" class="btn btn-sm btn-primary" data-action="show-all-quote-catalog">Mostrar todas (' + (SOLAR_QUOTE_CATALOG.length + personalCount) + ')</button></div><p class="quote-catalog-warning" data-catalog-warning hidden>Este pack llave en mano incluye el suministro y los trabajos habituales. No lo combines con esas mismas partidas desglosadas.</p><div class="quote-catalog-results" data-catalog-results></div><div class="quote-catalog-footer">Referencias: <a href="' + esc(SOLAR_PRICE_SOURCES.canary.url) + '" target="_blank" rel="noopener">precios residenciales publicados en Canarias</a>, <a href="' + esc(SOLAR_PRICE_SOURCES.market.url) + '" target="_blank" rel="noopener">desglose fotovoltaico 2026</a>, <a href="' + esc(SOLAR_PRICE_SOURCES.preoc.url) + '" target="_blank" rel="noopener">PREOC 2026</a> y <a href="' + esc(SOLAR_PRICE_SOURCES.cype.url) + '" target="_blank" rel="noopener">CYPE</a>. Precios editables de referencia; comprueba stock, envío interinsular, alcance e IGIC antes de enviar. Las cantidades sugeridas no sustituyen el replanteo ni el cálculo eléctrico.</div></section>';
   }
   function quoteCatalogItems() {
     return SOLAR_QUOTE_CATALOG.concat((data.company.quoteCatalog || []).map(item => Object.assign({}, item, { group: 'personal', personal: true, source: 'custom' })));
@@ -1690,13 +1690,16 @@ notify pgrst, 'reload schema';`;
     if (!results) return;
     const group = ($('[data-catalog-group]', form) || {}).value || 'todas';
     const search = normalizeSearchText(($('[data-catalog-search]', form) || {}).value || '');
+    const allItems = quoteCatalogItems();
     const featuredIds = ['kit-3kwp', 'kit-5kwp', 'kit-5kwp-battery', 'panel-tier1', 'inverter-hybrid', 'battery-5kwh', 'structure-tile', 'protection-kit-1ph', 'cable-set-kwp', 'smart-meter', 'wiring-protection', 'mounting-labor', 'legalization', 'travel-visit'];
-    const items = quoteCatalogItems().filter(item => {
+    const items = allItems.filter(item => {
       const inGroup = group === 'todas' || item.group === group || (group === 'frecuentes' && (item.featured || featuredIds.includes(item.id))) || (group === 'personal' && item.personal);
       const haystack = normalizeSearchText([item.description, item.category, item.unit, item.range, item.sourceNote].join(' '));
       return inGroup && (!search || haystack.includes(search));
     });
     results.innerHTML = items.length ? items.map(quoteCatalogCardMarkup).join('') : '<p class="quote-catalog-empty">No hay partidas en este grupo todavía. Añade una partida a mano y pulsa «Guardar en mi catálogo» para reutilizarla en próximos presupuestos.</p>';
+    const resultCount = $('[data-catalog-result-count]', form);
+    if (resultCount) resultCount.textContent = 'Mostrando ' + items.length + ' de ' + allItems.length + ' partidas';
     const warning = $('[data-catalog-warning]', form);
     if (warning) warning.hidden = group !== 'kits' && !items.some(item => item.group === 'kits');
   }
@@ -1870,7 +1873,14 @@ notify pgrst, 'reload schema';`;
       if (input && preset[name] != null && preset[name] !== '') input.dataset.inherited = 'true';
     });
     if (hasDetailedLines) updateQuoteTotals($('#entity-form'));
-    if (type === 'quote') renderQuoteCatalog($('#entity-form'));
+    if (type === 'quote') {
+      const quoteForm = $('#entity-form');
+      const catalogGroup = $('[data-catalog-group]', quoteForm);
+      const catalogSearch = $('[data-catalog-search]', quoteForm);
+      if (catalogGroup) catalogGroup.value = 'todas';
+      if (catalogSearch) catalogSearch.value = '';
+      renderQuoteCatalog(quoteForm);
+    }
     const first = $('#entity-form input, #entity-form select, #entity-form textarea');
     if (first) setTimeout(() => first.focus(), 40);
   }
@@ -2358,6 +2368,15 @@ notify pgrst, 'reload schema';`;
     const action = target.dataset.action;
     if (action === 'close-sidebar') { $('#sidebar').classList.remove('open'); return; }
     if (action === 'close-modal') { $('#modal-root').innerHTML = ''; return; }
+    if (action === 'show-all-quote-catalog') {
+      const form = target.closest('form');
+      const group = $('[data-catalog-group]', form);
+      const search = $('[data-catalog-search]', form);
+      if (group) group.value = 'todas';
+      if (search) search.value = '';
+      renderQuoteCatalog(form);
+      return;
+    }
     if (action === 'add-quote-line') { addQuoteLine(target.closest('form')); return; }
     if (action === 'add-catalog-quote-line') { addCatalogQuoteLine(target.closest('form'), target.dataset.catalogId); return; }
     if (action === 'add-solar-quote-bundle') { addSolarQuoteBundle(target.closest('form')); return; }

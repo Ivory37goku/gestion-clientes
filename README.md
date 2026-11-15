@@ -52,7 +52,7 @@ El APK tiene su propio identificador Android y carga Gestión Clientes. Puede
 abrir la versión publicada cuando está disponible y conserva los archivos locales
 para seguir trabajando sin conexión.
 
-Descarga directa de Android: [Gestión Clientes 1.0.13](https://raw.githubusercontent.com/Ivory37goku/gestion-clientes/main/downloads/gestion-clientes-1.0.13.apk).
+Descarga directa de Android: [Gestión Clientes 1.0.14](https://raw.githubusercontent.com/Ivory37goku/gestion-clientes/main/downloads/gestion-clientes-1.0.14.apk).
 
 ## Windows
 

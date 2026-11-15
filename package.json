@@ -1,6 +1,6 @@
 {
   "name": "gestion-clientes",
-  "version": "1.0.13",
+  "version": "1.0.14",
   "private": true,
   "description": "Gestión de clientes, leads, obras, tareas y finanzas.",
   "main": "desktop/main.cjs",
