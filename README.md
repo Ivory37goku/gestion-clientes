@@ -8,11 +8,13 @@ Laboral, pero conserva sus registros en una tabla separada.
 ## Qué incluye
 
 - Leads con embudo comercial, importe estimado, responsable y seguimiento.
+- Tableros Kanban para leads, tareas y obras, con cambio de fase desde cada tarjeta y alternativa en lista.
+- Segmentación de leads, clientes y obras por isla canaria, heredada automáticamente al convertir contactos o crear visitas y proyectos relacionados.
 - Flujo guiado de lead a cliente, obra, presupuesto y factura; acciones rápidas con el cliente y la obra ya vinculados.
 - Clientes convertibles desde un lead y con varias obras asociadas.
 - Obras con fechas, presupuesto, estado, avance y responsable.
 - Tareas por obra o cliente, con prioridades y vencimientos.
-- Vistas de Mi día, incidencias, mantenimiento y checklists sobre las tareas existentes.
+- Mi día con navegación por fecha y resumen de tareas, visitas y seguimientos; incidencias, mantenimiento y checklists organizados sobre las tareas existentes.
 - Agenda de visitas, citas, tareas y seguimientos.
 - Panel operativo con alertas, actividad reciente, pipeline y accesos rápidos.
 - Presupuestos detallados con horas, tarifas, desplazamientos y materiales; cálculo e impresión/PDF con IGIC.

@@ -43,6 +43,7 @@ create policy "Users can update their own Gestión Clientes data"
 -- Actualiza la caché de esquema de PostgREST inmediatamente.
 notify pgrst, 'reload schema';`;
   const COLLECTIONS = ['leads', 'clients', 'works', 'tasks', 'quotes', 'invoices', 'payments', 'expenses', 'events', 'documents', 'team'];
+  const CANARY_ISLANDS = ['Gran Canaria', 'Tenerife', 'Lanzarote', 'Fuerteventura', 'La Palma', 'La Gomera', 'El Hierro', 'La Graciosa'];
   const TITLES = { dashboard: 'Resumen', myday: 'Mi día', agenda: 'Agenda', visits: 'Visitas', leads: 'Leads', clients: 'Clientes', works: 'Obras', tasks: 'Tareas', incidents: 'Incidencias', maintenance: 'Mantenimiento', checklists: 'Checklists', quotes: 'Presupuestos', finance: 'Facturas y gastos', documents: 'Documentos', reports: 'Informes', team: 'Equipo', settings: 'Ajustes' };
   const TASK_CATEGORIES = ['General', 'Incidencia', 'Mantenimiento', 'Checklist'];
   const STATUS = {
@@ -115,6 +116,9 @@ notify pgrst, 'reload schema';`;
   let cloudBusy = false;
   let settingsTab = 'empresa';
   let agendaMonth = today.slice(0, 7);
+  let myDayDate = today;
+  let islandFilter = 'all';
+  const viewModes = { leads: 'board', works: 'board', tasks: 'board' };
 
   function load() {
     try {
@@ -176,6 +180,8 @@ notify pgrst, 'reload schema';`;
     view = next;
     searchText = '';
     filterValue = 'all';
+    islandFilter = 'all';
+    if (next === 'myday') myDayDate = today;
     closeGlobalSearch(true);
     $$('.nav-item').forEach(b => b.classList.toggle('active', b.dataset.view === view));
     $('#crumb-title').textContent = TITLES[view] || 'Resumen';
@@ -357,9 +363,13 @@ notify pgrst, 'reload schema';`;
   function renderAttention() {
     const tasks = data.tasks.filter(t => t.status !== 'Hecha' && t.due && t.due <= today).map(t => ({ type: 'task', id: t.id, rank: t.due, title: t.title, detail: (t.due < today ? 'Tarea vencida' : 'Tarea para hoy') + ' · ' + (workName(t.workId) || selected(data.clients, t.clientId) || 'Sin obra') }));
     const leads = data.leads.filter(l => !['Ganado', 'Perdido'].includes(l.stage) && l.nextDate && l.nextDate <= today).map(l => ({ type: 'lead', id: l.id, rank: l.nextDate, title: l.name || l.company || 'Seguimiento comercial', detail: (l.nextDate < today ? 'Seguimiento atrasado' : 'Seguimiento para hoy') + (l.company && l.name ? ' · ' + l.company : '') }));
+    const staleCutoff = dateKey(new Date(Date.now() - 7 * 86400000));
+    const staleLeads = data.leads.filter(l => !['Ganado', 'Perdido'].includes(l.stage) && !l.nextDate && String(l.updatedAt || l.createdAt || '').slice(0, 10) <= staleCutoff).map(l => ({ type: 'lead', id: l.id, rank: String(l.updatedAt || l.createdAt || '').slice(0, 10), title: l.name || l.company || 'Oportunidad sin seguimiento', detail: 'Lead sin próximo paso' + (l.island ? ' · ' + l.island : '') }));
+    const urgentIncidents = data.tasks.filter(t => t.category === 'Incidencia' && t.status !== 'Hecha' && t.priority === 'Alta').map(t => ({ type: 'task', id: t.id, rank: t.due && t.due < today ? t.due : today, title: t.title || 'Incidencia urgente', detail: 'Incidencia de prioridad alta' + (t.due ? ' · vence ' + dateFmt(t.due) : '') }));
+    const events = data.events.filter(e => e.date === today).map(e => ({ type: 'event', id: e.id, rank: e.date + (e.time || ''), title: e.title || 'Cita de hoy', detail: [e.time, e.kind, workName(e.workId) || selected(data.clients, e.clientId), e.island].filter(Boolean).join(' · ') }));
     const invoices = data.invoices.filter(i => outstanding(i) > 0 && i.due && i.due < today).map(i => ({ type: 'invoice', id: i.id, rank: i.due, title: i.title || 'Factura ' + i.number, detail: 'Factura vencida · ' + money(outstanding(i)) + ' pendiente' }));
     const dueWorks = data.works.filter(w => !['Terminada', 'Cancelada'].includes(w.status) && w.end && w.end >= today && w.end <= dateKey(new Date(Date.now() + 7 * 86400000))).map(w => ({ type: 'work', id: w.id, rank: w.end, title: w.name, detail: 'Fecha de entrega · ' + dateFmt(w.end) }));
-    const items = tasks.concat(leads, invoices, dueWorks).sort((a, b) => a.rank.localeCompare(b.rank)).slice(0, 5);
+    const items = urgentIncidents.concat(tasks, leads, staleLeads, events, invoices, dueWorks).sort((a, b) => a.rank.localeCompare(b.rank)).slice(0, 6);
     const body = items.length ? '<div class="attention-list">' + items.map((x, i) => '<button class="attention-item" data-action="detail" data-type="' + esc(x.type) + '" data-id="' + esc(x.id) + '"><span class="attention-index">' + String(i + 1).padStart(2, '0') + '</span><span class="attention-copy"><strong>' + esc(x.title) + '</strong><small>' + esc(x.detail) + '</small></span><span class="attention-arrow">↗</span></button>').join('') + '</div>' : '<div class="attention-clear"><span class="attention-check">✓</span><div><strong>Todo al día</strong><p>No hay tareas vencidas, seguimientos atrasados ni entregas próximas.</p></div><button type="button" class="text-link" data-view="myday">Ver mi día →</button></div>';
     return card('Lo que pide atención hoy', body, items.length ? items.length + ' asuntos necesitan seguimiento' : 'Sin alertas pendientes', '<button class="text-link" data-view="myday">Abrir mi día →</button>');
   }
@@ -380,27 +390,44 @@ notify pgrst, 'reload schema';`;
   }
 
   function renderMyDay() {
-    const tasks = data.tasks.filter(t => t.status !== 'Hecha' && t.due && t.due <= today).sort((a, b) => a.due.localeCompare(b.due));
-    const events = data.events.filter(e => e.date === today).sort((a, b) => (a.time || '').localeCompare(b.time || ''));
-    const leads = data.leads.filter(l => !['Ganado', 'Perdido'].includes(l.stage) && l.nextDate && l.nextDate <= today).sort((a, b) => a.nextDate.localeCompare(b.nextDate));
-    const upcoming = data.tasks.filter(t => t.status !== 'Hecha' && t.due > today && t.due <= dateKey(new Date(Date.now() + 7 * 86400000))).sort((a, b) => a.due.localeCompare(b.due)).slice(0, 6);
-    const items = tasks.map(t => ({ type: 'task', id: t.id, time: t.due, when: dateFmt(t.due), title: t.title, detail: (t.due < today ? 'Vencida' : 'Hoy') + ' · ' + (workName(t.workId) || selected(data.clients, t.clientId) || 'Sin obra asignada'), status: t.status }))
-      .concat(events.map(e => ({ type: 'event', id: e.id, time: e.date + (e.time || '23:59'), when: e.time || 'Todo el día', title: e.title, detail: [e.kind, workName(e.workId) || selected(data.clients, e.clientId)].filter(Boolean).join(' · '), status: e.kind || 'Cita' })))
-      .concat(leads.map(l => ({ type: 'lead', id: l.id, time: l.nextDate, when: dateFmt(l.nextDate), title: l.name || l.company || 'Seguimiento comercial', detail: 'Seguimiento ' + (l.nextDate < today ? 'atrasado' : 'hoy') + (l.company && l.name ? ' · ' + l.company : ''), status: l.stage })))
+    const day = myDayDate || today;
+    const dayEnd = dateKey(new Date(new Date(day + 'T12:00:00').getTime() + 7 * 86400000));
+    const tasks = data.tasks.filter(t => t.status !== 'Hecha' && t.due && t.due <= day).sort((a, b) => a.due.localeCompare(b.due));
+    const events = data.events.filter(e => e.date === day).sort((a, b) => (a.time || '').localeCompare(b.time || ''));
+    const leads = data.leads.filter(l => !['Ganado', 'Perdido'].includes(l.stage) && l.nextDate && l.nextDate <= day).sort((a, b) => a.nextDate.localeCompare(b.nextDate));
+    const upcoming = data.tasks.filter(t => t.status !== 'Hecha' && t.due > day && t.due <= dayEnd).sort((a, b) => a.due.localeCompare(b.due)).slice(0, 6);
+    const items = tasks.map(t => ({ type: 'task', id: t.id, time: t.due, when: dateFmt(t.due), title: t.title, detail: (t.due < day ? 'Vencida' : 'Para esta fecha') + ' · ' + (workName(t.workId) || selected(data.clients, t.clientId) || 'Sin obra asignada'), status: t.status }))
+      .concat(events.map(e => ({ type: 'event', id: e.id, time: e.date + (e.time || '23:59'), when: e.time || 'Todo el día', title: e.title, detail: [e.kind, workName(e.workId) || selected(data.clients, e.clientId), e.island].filter(Boolean).join(' · '), status: e.kind || 'Cita' })))
+      .concat(leads.map(l => ({ type: 'lead', id: l.id, time: l.nextDate, when: dateFmt(l.nextDate), title: l.name || l.company || 'Seguimiento comercial', detail: 'Seguimiento ' + (l.nextDate < day ? 'atrasado' : 'pendiente') + (l.company && l.name ? ' · ' + l.company : '') + (l.island ? ' · ' + l.island : ''), status: l.stage })))
       .sort((a, b) => String(a.time).localeCompare(String(b.time)));
-    const todayContent = items.length ? '<div class="list">' + items.map(x => row(x.title, x.detail, x.status, '<span class="row-date">' + esc(x.when) + '</span>', '', x.id, x.type)).join('') + '</div>' : empty('No tienes asuntos para hoy', 'Las tareas vencidas, citas de hoy y seguimientos pendientes aparecerán en esta lista.', 'task', 'Añadir tarea');
+    const todayContent = items.length ? '<div class="list">' + items.map(x => row(x.title, x.detail, x.status, '<span class="row-date">' + esc(x.when) + '</span>', '', x.id, x.type)).join('') + '</div>' : '<div class="day-clear"><strong>Sin asuntos para esta fecha</strong><p>Elige otro día o programa una tarea, visita o seguimiento.</p>' + newBtn('task', 'Crear tarea') + '</div>';
     const upcomingContent = upcoming.length ? '<div class="list">' + upcoming.map(t => row(t.title, workName(t.workId) || selected(data.clients, t.clientId) || 'Sin obra asignada', t.status, '<span class="row-date">' + esc(dateFmt(t.due)) + '</span>', '', t.id, 'task')).join('') + '</div>' : '<div class="activity-empty"><strong>Sin tareas para los próximos siete días</strong><p>Cuando añadas fechas límite, las verás aquí.</p></div>';
-    return header('ORGANIZACIÓN PERSONAL', 'Mi día', 'Empieza por lo urgente y consulta después lo que viene en camino.', newBtn('task', 'Nueva tarea')) +
-      '<div class="kpis">' + kpi('Pendientes de hoy', items.length, tasks.filter(t => t.due < today).length + ' tareas vencidas', '◉') + kpi('Citas de hoy', events.length, 'visitas y reuniones', '◷') + kpi('Seguimientos', leads.length, 'leads que requieren respuesta', '✳') + kpi('Tareas esta semana', upcoming.length, 'próximos siete días', '☷') + '</div>' +
-      '<div class="grid-2 day-grid">' + card('Hoy · ' + dateFmt(today, { weekday: 'long', day: 'numeric', month: 'long' }), todayContent, items.length ? 'Ordenado por fecha y hora' : 'Todo despejado') + card('Próximos siete días', upcomingContent, 'Planifica con margen', '<button class="text-link" data-view="agenda">Abrir agenda →</button>') + '</div>';
+    const dayTitle = new Date(day + 'T12:00:00').toLocaleDateString('es-ES', { weekday: 'long', day: 'numeric', month: 'long', year: 'numeric' });
+    const dateControls = '<div class="day-date-controls"><button class="btn btn-sm" data-action="myday-shift" data-delta="-1" aria-label="Día anterior">←</button><button class="btn btn-sm" data-action="myday-today">Hoy</button><strong>' + esc(dayTitle) + '</strong><button class="btn btn-sm" data-action="myday-shift" data-delta="1" aria-label="Día siguiente">→</button></div>';
+    return header('ORGANIZACIÓN PERSONAL', 'Mi día', 'Consulta lo urgente, planifica la semana y cambia de fecha para preparar el trabajo.', newBtn('task', 'Nueva tarea')) + dateControls +
+      '<div class="kpis">' + kpi('Asuntos pendientes', items.length, tasks.filter(t => t.due < day).length + ' tareas vencidas a esta fecha', '◉') + kpi('Citas', events.length, 'para el día seleccionado', '◷') + kpi('Seguimientos', leads.length, 'oportunidades pendientes', '✳') + kpi('Tareas próximos 7 días', upcoming.length, 'desde la fecha elegida', '☷') + '</div>' +
+      '<div class="grid-2 day-grid">' + card('Pendientes · ' + dateFmt(day, { weekday: 'long', day: 'numeric', month: 'long' }), todayContent, items.length ? 'Ordenado por fecha y hora' : 'Sin pendientes') + card('Próximos siete días', upcomingContent, 'Planifica con margen', '<button class="text-link" data-view="agenda">Abrir agenda →</button>') + '</div>';
   }
 
   function renderVisits() {
-    const visits = data.events.filter(e => e.kind === 'Visita de obra').slice().sort((a, b) => String(a.date + (a.time || '')).localeCompare(String(b.date + (b.time || ''))));
-    const list = visits.length ? '<div class="list">' + visits.map(e => '<div class="row-item visit-row"><span class="visit-date"><b>' + esc(dateFmt(e.date, { day: '2-digit' })) + '</b><small>' + esc(dateFmt(e.date, { month: 'short' })) + '</small></span><div class="row-main" data-action="detail" data-type="event" data-id="' + esc(e.id) + '"><div class="row-title">' + esc(e.title) + badge(e.date < today ? 'Realizada' : e.date === today ? 'Hoy' : 'Programada') + '</div><div class="row-sub">' + esc([e.time, workName(e.workId), selected(data.clients, e.clientId), e.owner ? teamName(e.owner) : ''].filter(Boolean).join(' · ') || 'Sin obra ni cliente asociados') + '</div></div><div class="row-end"><button type="button" class="tiny-btn" data-action="edit" data-type="event" data-id="' + esc(e.id) + '">Editar</button></div></div>').join('') + '</div>' : empty('Aún no hay visitas programadas', 'Añade una visita desde aquí y se vinculará a la agenda, el cliente y la obra.', 'event', 'Programar visita');
+    let visits = data.events.filter(e => e.kind === 'Visita de obra');
+    if (searchText) visits = visits.filter(e => normalizeSearchText(JSON.stringify(e) + ' ' + workName(e.workId) + ' ' + clientName(e.clientId) + ' ' + teamName(e.owner)).includes(normalizeSearchText(searchText)));
+    if (islandFilter !== 'all') visits = visits.filter(e => {
+      const work = data.works.find(item => item.id === e.workId);
+      const client = data.clients.find(item => item.id === e.clientId) || (work && data.clients.find(item => item.id === work.clientId));
+      return (e.island || (work && work.island) || (client && client.island) || '') === islandFilter;
+    });
+    visits.sort((a, b) => String(a.date + (a.time || '')).localeCompare(String(b.date + (b.time || ''))));
+    const list = visits.length ? '<div class="list">' + visits.map(e => {
+      const work = data.works.find(item => item.id === e.workId);
+      const client = data.clients.find(item => item.id === e.clientId) || (work && data.clients.find(item => item.id === work.clientId));
+      const island = e.island || (work && work.island) || (client && client.island) || '';
+      return '<div class="row-item visit-row"><span class="visit-date"><b>' + esc(dateFmt(e.date, { day: '2-digit' })) + '</b><small>' + esc(dateFmt(e.date, { month: 'short' })) + '</small></span><div class="row-main" data-action="detail" data-type="event" data-id="' + esc(e.id) + '"><div class="row-title">' + esc(e.title) + badge(e.date < today ? 'Realizada' : e.date === today ? 'Hoy' : 'Programada') + '</div><div class="row-sub">' + esc([e.time, workName(e.workId), selected(data.clients, e.clientId), island, e.owner ? teamName(e.owner) : ''].filter(Boolean).join(' · ') || 'Sin obra ni cliente asociados') + '</div></div><div class="row-end"><button type="button" class="tiny-btn" data-action="edit" data-type="event" data-id="' + esc(e.id) + '">Editar</button></div></div>';
+    }).join('') + '</div>' : empty(searchText || islandFilter !== 'all' ? 'No hay visitas con estos filtros' : 'Aún no hay visitas programadas', searchText || islandFilter !== 'all' ? 'Cambia la búsqueda o selecciona otra isla.' : 'Añade una visita desde aquí y se vinculará a la agenda, el cliente y la obra.', 'event', 'Programar visita', ' data-kind="Visita de obra"');
+    const toolbar = '<div class="toolbar"><div class="search"><input id="search-input" type="search" value="' + esc(searchText) + '" placeholder="Buscar visita, cliente u obra…" aria-label="Buscar visitas"></div><select id="island-filter" aria-label="Filtrar por isla">' + islandOptions(islandFilter) + '</select><span class="muted small">' + visits.length + (visits.length === 1 ? ' visita' : ' visitas') + '</span></div>';
     const next = visits.filter(e => e.date >= today).length;
     return header('TRABAJO EN CAMPO', 'Visitas', 'Planifica visitas de obra y consulta rápidamente a quién y dónde tienes que ir.', newBtn('event', 'Programar visita', ' data-kind="Visita de obra"')) +
-      '<div class="kpis">' + kpi('Visitas próximas', next, 'incluye las de hoy', '⌖') + kpi('Obras activas', data.works.filter(w => w.status === 'En curso').length, 'con planificación en curso', '▦') + kpi('Equipo disponible', data.team.filter(p => p.active !== false).length, 'responsables registrados', '♧') + kpi('Clientes', data.clients.length, 'contactos en cartera', '♙') + '</div>' + card('Agenda de visitas', list, 'Cada visita queda guardada también en la agenda general');
+      '<div class="kpis">' + kpi('Visitas próximas', next, 'incluye las de hoy', '⌖') + kpi('Obras activas', data.works.filter(w => w.status === 'En curso').length, 'con planificación en curso', '▦') + kpi('Equipo disponible', data.team.filter(p => p.active !== false).length, 'responsables registrados', '♧') + kpi('Clientes', data.clients.length, 'contactos en cartera', '♙') + '</div>' + card('Agenda de visitas', toolbar + list, 'Cada visita queda guardada también en la agenda general');
   }
 
   function renderTaskCategory(page) {
@@ -471,20 +498,52 @@ notify pgrst, 'reload schema';`;
     quotes: { title: 'Presupuestos', sub: 'Prepara propuestas, controla su estado y conviértelas en facturas.', type: 'quote', singular: 'presupuesto', collection: 'quotes', filter: 'quote', fields: ['status'] },
     documents: { title: 'Documentos', sub: 'Enlaces a planos, contratos, fotos y documentación relacionada con tus obras.', type: 'document', singular: 'documento', collection: 'documents' }
   };
+  function islandOptions(selectedIsland) {
+    return '<option value="all">Todas las islas</option>' + CANARY_ISLANDS.map(island => '<option value="' + esc(island) + '"' + (selectedIsland === island ? ' selected' : '') + '>' + esc(island) + '</option>').join('');
+  }
+  function renderKanbanBoard(key, items) {
+    const isLead = key === 'leads';
+    const isTask = key === 'tasks';
+    const type = isLead ? 'lead' : isTask ? 'task' : 'work';
+    const stages = STATUS[isLead ? 'lead' : isTask ? 'task' : 'work'];
+    const field = isLead ? 'stage' : 'status';
+    const columns = stages.map(stage => {
+      const cards = items.filter(item => (item[field] || stages[0]) === stage);
+      const cardRows = cards.map(item => {
+        const title = isLead ? (item.name || item.company || 'Lead sin nombre') : isTask ? (item.title || 'Tarea sin título') : (item.name || 'Obra sin nombre');
+        const linkedClient = !isLead ? data.clients.find(client => client.id === item.clientId) : null;
+        const taskWork = isTask ? data.works.find(work => work.id === item.workId) : null;
+        const itemIsland = item.island || (linkedClient && linkedClient.island) || (taskWork && taskWork.island) || '';
+        const info = isLead
+          ? [item.company && item.name ? item.company : '', item.island, item.nextDate ? 'Seguimiento ' + dateFmt(item.nextDate) : 'Sin próximo paso'].filter(Boolean).join(' · ')
+          : isTask ? [item.category || 'General', item.priority ? 'Prioridad ' + item.priority : '', item.due ? ((item.due < today && item.status !== 'Hecha') ? 'Vencida ' : 'Vence ') + dateFmt(item.due) : 'Sin fecha', workName(item.workId) || selected(data.clients, item.clientId)].filter(Boolean).join(' · ')
+          : [selected(data.clients, item.clientId), itemIsland, item.end ? 'Entrega ' + dateFmt(item.end) : 'Sin fecha de entrega'].filter(Boolean).join(' · ');
+        const amount = isLead ? money(item.value) : isTask ? '' : money(item.budget);
+        const select = '<label class="kanban-move-label" for="move-' + type + '-' + esc(item.id) + '">Mover a</label><select class="kanban-move" id="move-' + type + '-' + esc(item.id) + '" data-move-type="' + type + '" data-id="' + esc(item.id) + '" aria-label="Mover ' + esc(title) + ' a otra fase">' + stages.map(option => '<option value="' + esc(option) + '"' + (option === stage ? ' selected' : '') + '>' + esc(option) + '</option>').join('') + '</select>';
+        return '<article class="kanban-card"><button type="button" class="kanban-card-open" data-action="detail" data-type="' + type + '" data-id="' + esc(item.id) + '"><strong>' + esc(title) + '</strong><span>' + esc(info || 'Sin información adicional') + '</span>' + (!isTask ? '<span class="kanban-card-bottom"><b>' + esc(amount) + '</b>' + (isLead && item.owner ? '<small>' + esc(teamName(item.owner)) + '</small>' : !isLead ? '<small>' + Math.round(num(item.progress)) + '% completado</small>' : '') + '</span>' : item.owner ? '<span class="kanban-card-bottom"><small>' + esc(teamName(item.owner)) + '</small></span>' : '') + (!isLead && !isTask ? '<span class="progress"><i style="width:' + Math.min(100, Math.max(0, num(item.progress))) + '%"></i></span>' : '') + '</button>' + select + '</article>';
+      }).join('');
+      return '<section class="kanban-column"><header><strong>' + esc(stage) + '</strong><span>' + cards.length + '</span></header><div class="kanban-column-cards">' + (cardRows || '<p class="kanban-empty">Sin registros en esta fase</p>') + '</div></section>';
+    }).join('');
+    return '<div class="kanban-board" aria-label="Tablero por fases de ' + (isLead ? 'leads' : isTask ? 'tareas' : 'obras') + '">' + columns + '</div>';
+  }
   function renderListView(key) {
     const cfg = PAGE_CONFIG[key];
     if (!cfg) return renderDashboard();
     const headerActions = newBtn(cfg.type, 'Nuevo ' + cfg.singular);
     const head = header(key === 'leads' || key === 'quotes' ? 'COMERCIAL' : key === 'works' ? 'OPERACIONES' : key === 'tasks' ? 'ORGANIZACIÓN' : key === 'documents' ? 'ADMINISTRACIÓN' : 'RELACIONES', cfg.title, cfg.sub, headerActions);
     let items = data[cfg.collection].slice();
-    const q = searchText.toLocaleLowerCase('es');
-    if (q) items = items.filter(x => JSON.stringify(x).toLocaleLowerCase('es').includes(q));
-    if (filterValue !== 'all') items = items.filter(x => (x.stage || x.status || x.priority || x.kind) === filterValue);
+    const q = normalizeSearchText(searchText);
+    if (q) items = items.filter(x => normalizeSearchText(JSON.stringify(x) + ' ' + clientName(x.clientId) + ' ' + workName(x.workId) + ' ' + teamName(x.owner)).includes(q));
+    if (filterValue !== 'all') items = items.filter(x => [x.stage, x.status, x.priority, x.kind].includes(filterValue));
+    if (islandFilter !== 'all' && ['leads', 'clients', 'works'].includes(key)) items = items.filter(x => (x.island || (key === 'works' ? (data.clients.find(client => client.id === x.clientId) || {}).island : '')) === islandFilter);
     if (key === 'tasks') items.sort((a, b) => (a.status === 'Hecha') - (b.status === 'Hecha') || (a.due || '9999').localeCompare(b.due || '9999'));
     else items.sort((a, b) => String(b.updatedAt || b.createdAt || '').localeCompare(String(a.updatedAt || a.createdAt || '')));
-    const search = '<div class="toolbar"><div class="search"><input id="search-input" type="search" value="' + esc(searchText) + '" placeholder="Buscar ' + esc(cfg.title.toLowerCase()) + '..." aria-label="Buscar ' + esc(cfg.title.toLowerCase()) + '"></div>' + (cfg.fields ? '<select id="filter-select" aria-label="Filtrar por estado"><option value="all">Todos los estados</option>' + STATUS[cfg.filter].map(s => '<option' + (filterValue === s ? ' selected' : '') + '>' + esc(s) + '</option>').join('') + (key === 'tasks' ? '<option' + (filterValue === 'Alta' ? ' selected' : '') + '>Alta</option><option' + (filterValue === 'Media' ? ' selected' : '') + '>Media</option><option' + (filterValue === 'Baja' ? ' selected' : '') + '>Baja</option>' : '') + '</select>' : '') + '<span class="muted small">' + items.length + (items.length === 1 ? ' registro' : ' registros') + '</span></div>';
-    const content = items.length ? '<div class="list">' + items.map(x => renderListRow(key, x)).join('') + '</div>' : empty(q || filterValue !== 'all' ? 'No se encontraron resultados' : 'Todavía no hay registros', q ? 'Prueba con otra búsqueda.' : 'Crea el primero para empezar a organizarlo.', cfg.type, 'Crear ' + cfg.singular);
-    return head + '<section class="card">' + search + content + '</section>';
+    const toolbar = '<div class="toolbar"><div class="search"><input id="search-input" type="search" value="' + esc(searchText) + '" placeholder="Buscar ' + esc(cfg.title.toLowerCase()) + '..." aria-label="Buscar ' + esc(cfg.title.toLowerCase()) + '"></div>' + (cfg.fields ? '<select id="filter-select" aria-label="Filtrar por estado"><option value="all">Todos los estados</option>' + STATUS[cfg.filter].map(s => '<option value="' + esc(s) + '"' + (filterValue === s ? ' selected' : '') + '>' + esc(s) + '</option>').join('') + (key === 'tasks' ? '<option value="Alta"' + (filterValue === 'Alta' ? ' selected' : '') + '>Alta</option><option value="Media"' + (filterValue === 'Media' ? ' selected' : '') + '>Media</option><option value="Baja"' + (filterValue === 'Baja' ? ' selected' : '') + '>Baja</option>' : '') + '</select>' : '') + (['leads', 'clients', 'works'].includes(key) ? '<select id="island-filter" aria-label="Filtrar por isla">' + islandOptions(islandFilter) + '</select>' : '') + '<span class="muted small">' + items.length + (items.length === 1 ? ' registro' : ' registros') + '</span></div>';
+    const hasBoard = ['leads', 'works', 'tasks'].includes(key);
+    const boardDescription = key === 'leads' ? 'Avanza cada oportunidad por su fase y abre la ficha para contactar o convertirla en cliente.' : key === 'tasks' ? 'Prioriza el trabajo y mueve las tareas entre pendientes, en curso y hechas.' : 'Consulta el estado de entrega y mueve la obra a su siguiente fase.';
+    const modeToggle = hasBoard ? '<div class="board-toolbar"><p>' + esc(boardDescription) + '</p><div class="view-switch" aria-label="Vista de registros"><button type="button" class="' + (viewModes[key] === 'board' ? 'active' : '') + '" data-action="toggle-view-mode" data-view-mode="board" data-list-key="' + key + '">Kanban</button><button type="button" class="' + (viewModes[key] === 'list' ? 'active' : '') + '" data-action="toggle-view-mode" data-view-mode="list" data-list-key="' + key + '">Lista</button></div></div>' : '';
+    const content = !items.length ? empty(q || filterValue !== 'all' || islandFilter !== 'all' ? 'No se encontraron resultados' : 'Todavía no hay registros', q ? 'Prueba con otra búsqueda.' : 'Crea el primero para empezar a organizarlo.', cfg.type, 'Crear ' + cfg.singular) : hasBoard && viewModes[key] === 'board' ? renderKanbanBoard(key, items) : '<div class="list">' + items.map(x => renderListRow(key, x)).join('') + '</div>';
+    return head + '<section class="card">' + modeToggle + toolbar + content + '</section>';
   }
 
   function renderListRow(key, x) {
@@ -492,10 +551,10 @@ notify pgrst, 'reload schema';`;
       const nextAction = x.clientId
         ? '<button type="button" class="btn btn-sm" data-action="detail" data-type="client" data-id="' + esc(x.clientId) + '">Abrir cliente →</button>'
         : x.stage !== 'Perdido' ? '<button type="button" class="btn btn-sm btn-primary" data-action="convert-lead" data-id="' + esc(x.id) + '">Pasar a cliente →</button>' : '<button type="button" class="btn btn-sm" data-action="detail" data-type="lead" data-id="' + esc(x.id) + '">Ver oportunidad →</button>';
-      return '<div class="row-item list-flow-row"><div class="row-main" data-action="detail" data-type="lead" data-id="' + esc(x.id) + '"><div class="row-title">' + esc(x.name || x.company) + badge(x.stage) + '</div><div class="row-sub">' + esc((x.company && x.name ? x.company + ' · ' : '') + (x.source || 'Origen sin indicar') + (x.nextDate ? ' · próximo paso ' + dateFmt(x.nextDate) : '')) + '</div></div><div class="row-end"><div class="row-value-block"><div class="row-amount">' + esc(money(x.value)) + '</div><div class="row-date">' + esc(x.owner ? teamName(x.owner) : 'Valor estimado') + '</div></div>' + nextAction + '</div></div>';
+      return '<div class="row-item list-flow-row"><div class="row-main" data-action="detail" data-type="lead" data-id="' + esc(x.id) + '"><div class="row-title">' + esc(x.name || x.company) + badge(x.stage) + '</div><div class="row-sub">' + esc((x.company && x.name ? x.company + ' · ' : '') + (x.island ? x.island + ' · ' : '') + (x.source || 'Origen sin indicar') + (x.nextDate ? ' · próximo paso ' + dateFmt(x.nextDate) : ' · sin seguimiento')) + '</div></div><div class="row-end"><div class="row-value-block"><div class="row-amount">' + esc(money(x.value)) + '</div><div class="row-date">' + esc(x.owner ? teamName(x.owner) : 'Valor estimado') + '</div></div>' + nextAction + '</div></div>';
     }
-    if (key === 'clients') return '<div class="row-item list-flow-row"><div class="row-main" data-action="detail" data-type="client" data-id="' + esc(x.id) + '"><div class="row-title">' + esc(x.company || x.name) + '</div><div class="row-sub">' + esc([x.name && x.company ? x.name : '', x.email, x.phone, data.works.filter(w => w.clientId === x.id).length + ' obras'].filter(Boolean).join(' · ')) + '</div></div><div class="row-end"><span class="row-date">' + esc(x.city || '') + '</span><button type="button" class="btn btn-sm" data-action="quick-new" data-type="work" data-client-id="' + esc(x.id) + '">＋ Crear obra</button></div></div>';
-    if (key === 'works') return '<div class="row-item list-flow-row"><div class="row-main" data-action="detail" data-type="work" data-id="' + esc(x.id) + '"><div class="row-title">' + esc(x.name) + badge(x.status) + '</div><div class="row-sub">' + esc(selected(data.clients, x.clientId) + (x.address ? ' · ' + x.address : '') + (x.end ? ' · entrega ' + dateFmt(x.end) : '')) + '</div><div class="progress" style="margin-top:8px"><i style="width:' + Math.min(100, Math.max(0, num(x.progress))) + '%"></i></div></div><div class="row-end"><div class="row-value-block"><div class="row-amount">' + esc(money(x.budget)) + '</div><div class="row-date">' + esc(Math.round(num(x.progress)) + '% completado') + '</div></div><div class="row-quick-actions"><button type="button" class="btn btn-sm" data-action="quick-new" data-type="task" data-client-id="' + esc(x.clientId || '') + '" data-work-id="' + esc(x.id) + '">＋ Tarea</button><button type="button" class="btn btn-sm" data-action="quick-new" data-type="quote" data-client-id="' + esc(x.clientId || '') + '" data-work-id="' + esc(x.id) + '">Presupuesto</button></div></div></div>';
+    if (key === 'clients') return '<div class="row-item list-flow-row"><div class="row-main" data-action="detail" data-type="client" data-id="' + esc(x.id) + '"><div class="row-title">' + esc(x.company || x.name) + '</div><div class="row-sub">' + esc([x.name && x.company ? x.name : '', x.island, x.email, x.phone, data.works.filter(w => w.clientId === x.id).length + ' obras'].filter(Boolean).join(' · ')) + '</div></div><div class="row-end"><span class="row-date">' + esc(x.city || '') + '</span><button type="button" class="btn btn-sm" data-action="quick-new" data-type="work" data-client-id="' + esc(x.id) + '">＋ Crear obra</button></div></div>';
+    if (key === 'works') return '<div class="row-item list-flow-row"><div class="row-main" data-action="detail" data-type="work" data-id="' + esc(x.id) + '"><div class="row-title">' + esc(x.name) + badge(x.status) + '</div><div class="row-sub">' + esc(selected(data.clients, x.clientId) + (x.island ? ' · ' + x.island : '') + (x.address ? ' · ' + x.address : '') + (x.end ? ' · entrega ' + dateFmt(x.end) : '')) + '</div><div class="progress" style="margin-top:8px"><i style="width:' + Math.min(100, Math.max(0, num(x.progress))) + '%"></i></div></div><div class="row-end"><div class="row-value-block"><div class="row-amount">' + esc(money(x.budget)) + '</div><div class="row-date">' + esc(Math.round(num(x.progress)) + '% completado') + '</div></div><div class="row-quick-actions"><button type="button" class="btn btn-sm" data-action="quick-new" data-type="task" data-client-id="' + esc(x.clientId || '') + '" data-work-id="' + esc(x.id) + '">＋ Tarea</button><button type="button" class="btn btn-sm" data-action="quick-new" data-type="quote" data-client-id="' + esc(x.clientId || '') + '" data-work-id="' + esc(x.id) + '">Presupuesto</button></div></div></div>';
     if (key === 'tasks') return '<div class="row-item"><button class="tiny-btn ' + (x.status === 'Hecha' ? '' : 'danger') + '" data-action="toggle-task" data-id="' + esc(x.id) + '" aria-label="' + (x.status === 'Hecha' ? 'Reabrir' : 'Marcar hecha') + '">' + (x.status === 'Hecha' ? '✓' : '○') + '</button><div class="row-main" data-action="detail" data-type="task" data-id="' + esc(x.id) + '"><div class="row-title">' + esc(x.title) + badge(x.status) + badge(x.category || 'General') + badge(x.priority || 'Media') + '</div><div class="row-sub">' + esc(workName(x.workId) || selected(data.clients, x.clientId) || 'Sin proyecto') + (x.owner ? ' · ' + teamName(x.owner) : '') + '</div></div><div class="row-end"><span class="row-date">' + esc(x.due ? 'Vence ' + dateFmt(x.due) : 'Sin fecha') + '</span></div></div>';
     if (key === 'quotes') return row(x.title || ('Presupuesto ' + x.number), selected(data.clients, x.clientId) + (x.workId ? ' · ' + workName(x.workId) : '') + (x.validUntil ? ' · válido hasta ' + dateFmt(x.validUntil) : ''), x.status, amountEnd(total(x), dateFmt(x.date)), '', x.id, 'quote');
     return '<div class="row-item" data-action="detail" data-type="document" data-id="' + esc(x.id) + '"><div class="row-main"><div class="row-title">' + esc(x.title) + badge(x.kind || 'Documento') + '</div><div class="row-sub">' + esc(workName(x.workId) || selected(data.clients, x.clientId) || 'Sin asociar') + (x.notes ? ' · ' + esc(x.notes) : '') + '</div></div><div class="row-end"><a class="document-link btn btn-sm" href="' + esc(safeHref(x.url)) + '" target="_blank" rel="noopener">Abrir ↗</a><div class="row-actions"><button class="tiny-btn" data-action="edit" data-type="document" data-id="' + esc(x.id) + '">Editar</button><button class="tiny-btn danger" data-action="delete" data-type="document" data-id="' + esc(x.id) + '">Eliminar</button></div></div></div>';
@@ -702,14 +761,14 @@ notify pgrst, 'reload schema';`;
     const title = item.name || item.company || item.title || item.number || item.kind || 'Detalle';
     const facts = [];
     const add = (label, value) => { if (value !== '' && value != null) facts.push('<div class="row-item"><div class="row-main"><div class="row-sub">' + esc(label) + '</div><div class="row-title">' + esc(value) + '</div></div></div>'); };
-    if (type === 'lead') { add('Empresa', item.company); add('Estado', item.stage); add('Teléfono', item.phone); add('Correo', item.email); add('Origen', item.source); add('Valor estimado', money(item.value)); add('Próximo seguimiento', dateFmt(item.nextDate)); add('Notas', item.notes); }
-    if (type === 'client') { add('Contacto', item.name); add('CIF / NIF', item.taxId); add('Teléfono', item.phone); add('Correo', item.email); add('Dirección', item.address); add('Notas', item.notes); }
-    if (type === 'work') { add('Cliente', selected(data.clients, item.clientId)); add('Estado', item.status); add('Dirección', item.address); add('Inicio', dateFmt(item.start)); add('Entrega prevista', dateFmt(item.end)); add('Presupuesto', money(item.budget)); add('Avance', num(item.progress) + '%'); add('Responsable', teamName(item.owner)); add('Notas', item.notes); }
+    if (type === 'lead') { add('Empresa', item.company); add('Estado', item.stage); add('Teléfono', item.phone); add('Correo', item.email); add('Isla', item.island); add('Origen', item.source); add('Valor estimado', money(item.value)); add('Próximo seguimiento', dateFmt(item.nextDate)); add('Notas', item.notes); }
+    if (type === 'client') { add('Contacto', item.name); add('CIF / NIF', item.taxId); add('Teléfono', item.phone); add('Correo', item.email); add('Isla', item.island); add('Dirección', item.address); add('Notas', item.notes); }
+    if (type === 'work') { add('Cliente', selected(data.clients, item.clientId)); add('Estado', item.status); add('Isla', item.island); add('Dirección', item.address); add('Inicio', dateFmt(item.start)); add('Entrega prevista', dateFmt(item.end)); add('Presupuesto', money(item.budget)); add('Avance', num(item.progress) + '%'); add('Responsable', teamName(item.owner)); add('Notas', item.notes); }
     if (type === 'task') { add('Tipo de seguimiento', item.category || 'General'); add('Estado', item.status); add('Prioridad', item.priority); add('Obra', workName(item.workId)); add('Cliente', selected(data.clients, item.clientId)); add('Fecha límite', dateFmt(item.due)); add('Responsable', teamName(item.owner)); add('Descripción', item.description); }
     if (type === 'quote') { add('Cliente', selected(data.clients, item.clientId)); add('Obra', workName(item.workId)); add('Estado', item.status); add('Fecha', dateFmt(item.date)); add('Válido hasta', dateFmt(item.validUntil)); if (!Array.isArray(item.items) || !item.items.length) { add('Base imponible', money(item.amount)); add(item.taxName || (num(item.taxRate) === 21 ? 'Impuesto anterior' : 'IGIC'), num(item.taxRate) + '%'); add('Total', money(total(item))); } add('Descripción y condiciones', item.notes); }
     if (type === 'invoice') { add('Cliente', selected(data.clients, item.clientId)); add('Obra', workName(item.workId)); add('Estado', item.status); add('Emisión', dateFmt(item.date)); add('Vencimiento', dateFmt(item.due)); if (!Array.isArray(item.items) || !item.items.length) { add('Base imponible', money(item.amount)); add(item.taxName || (num(item.taxRate) === 21 ? 'Impuesto anterior' : 'IGIC'), num(item.taxRate) + '%'); add('Total', money(total(item))); } add('Cobrado', money(paidFor(item))); add('Pendiente', money(outstanding(item))); add('Descripción', item.notes); }
     if (type === 'expense') { add('Categoría', item.category); add('Proveedor', item.vendor); add('Fecha', dateFmt(item.date)); add('Importe', money(item.amount)); add('Obra', workName(item.workId)); add('Notas', item.notes); }
-    if (type === 'event') { add('Fecha', dateFmt(item.date)); add('Hora', item.time); add('Tipo', item.kind); add('Responsable', teamName(item.owner)); add('Notas', item.notes); }
+    if (type === 'event') { add('Fecha', dateFmt(item.date)); add('Hora', item.time); add('Tipo', item.kind); add('Isla', item.island); add('Responsable', teamName(item.owner)); add('Notas', item.notes); }
     if (type === 'document') { add('Tipo', item.kind); add('Relacionado con', workName(item.workId) || selected(data.clients, item.clientId)); add('Enlace', item.url); add('Notas', item.notes); }
     if (type === 'team') { add('Puesto', item.role); add('Correo', item.email); add('Teléfono', item.phone); add('Estado', item.active === false ? 'Inactivo' : 'Activo'); }
     if (type === 'payment') { add('Factura', selected(data.invoices, item.invoiceId)); add('Fecha', dateFmt(item.date)); add('Método', item.method); add('Importe', money(item.amount)); add('Notas', item.notes); }
@@ -723,13 +782,13 @@ notify pgrst, 'reload schema';`;
 
   const FIELDS = {
     lead: [
-      ['name', 'Nombre de contacto', 'text', true], ['company', 'Empresa', 'text'], ['phone', 'Teléfono', 'tel'], ['email', 'Correo', 'email'], ['source', 'Origen', 'select', false, ['Recomendación', 'Web', 'Llamada', 'Redes sociales', 'Visita', 'Otro']], ['stage', 'Estado del lead', 'select', false, STATUS.lead], ['value', 'Valor estimado (€)', 'number'], ['probability', 'Probabilidad (%)', 'number'], ['nextDate', 'Próximo seguimiento', 'date'], ['owner', 'Responsable', 'team'], ['notes', 'Notas', 'textarea', false, null, 'full']
+      ['name', 'Nombre de contacto', 'text', true], ['company', 'Empresa', 'text'], ['phone', 'Teléfono', 'tel'], ['email', 'Correo', 'email'], ['island', 'Isla', 'select', false, CANARY_ISLANDS], ['source', 'Origen', 'select', false, ['Recomendación', 'Web', 'Llamada', 'Redes sociales', 'Visita', 'Otro']], ['stage', 'Estado del lead', 'select', false, STATUS.lead], ['value', 'Valor estimado (€)', 'number'], ['probability', 'Probabilidad (%)', 'number'], ['nextDate', 'Próximo seguimiento', 'date'], ['owner', 'Responsable', 'team'], ['notes', 'Notas', 'textarea', false, null, 'full']
     ],
     client: [
-      ['company', 'Empresa / nombre comercial', 'text', true], ['name', 'Persona de contacto', 'text'], ['taxId', 'CIF / NIF', 'text'], ['phone', 'Teléfono', 'tel'], ['email', 'Correo', 'email'], ['address', 'Dirección', 'text', false, null, 'full'], ['notes', 'Notas', 'textarea', false, null, 'full']
+      ['company', 'Empresa / nombre comercial', 'text', true], ['name', 'Persona de contacto', 'text'], ['taxId', 'CIF / NIF', 'text'], ['phone', 'Teléfono', 'tel'], ['email', 'Correo', 'email'], ['island', 'Isla', 'select', false, CANARY_ISLANDS], ['address', 'Dirección', 'text', false, null, 'full'], ['notes', 'Notas', 'textarea', false, null, 'full']
     ],
     work: [
-      ['name', 'Nombre de la obra', 'text', true], ['clientId', 'Cliente', 'client', true], ['status', 'Estado', 'select', false, STATUS.work], ['address', 'Dirección de la obra', 'text', false, null, 'full'], ['start', 'Fecha de inicio', 'date'], ['end', 'Fecha prevista de entrega', 'date'], ['budget', 'Presupuesto (€)', 'number'], ['progress', 'Avance (%)', 'number'], ['owner', 'Responsable', 'team'], ['notes', 'Descripción / notas', 'textarea', false, null, 'full']
+      ['name', 'Nombre de la obra', 'text', true], ['clientId', 'Cliente', 'client', true], ['status', 'Estado', 'select', false, STATUS.work], ['island', 'Isla', 'select', false, CANARY_ISLANDS], ['address', 'Dirección de la obra', 'text', false, null, 'full'], ['start', 'Fecha de inicio', 'date'], ['end', 'Fecha prevista de entrega', 'date'], ['budget', 'Presupuesto (€)', 'number'], ['progress', 'Avance (%)', 'number'], ['owner', 'Responsable', 'team'], ['notes', 'Descripción / notas', 'textarea', false, null, 'full']
     ],
     task: [
       ['title', 'Tarea', 'text', true], ['category', 'Tipo de seguimiento', 'select', false, TASK_CATEGORIES], ['workId', 'Obra relacionada', 'work'], ['clientId', 'Cliente', 'client'], ['due', 'Fecha límite', 'date'], ['priority', 'Prioridad', 'select', false, ['Alta', 'Media', 'Baja']], ['status', 'Estado', 'select', false, STATUS.task], ['owner', 'Responsable', 'team'], ['description', 'Descripción', 'textarea', false, null, 'full']
@@ -744,7 +803,7 @@ notify pgrst, 'reload schema';`;
       ['title', 'Concepto del gasto', 'text', true], ['category', 'Categoría', 'select', false, ['Materiales', 'Personal', 'Transporte', 'Herramientas', 'Subcontrata', 'Suministros', 'Otros']], ['vendor', 'Proveedor', 'text'], ['date', 'Fecha', 'date'], ['amount', 'Importe (€)', 'number', true], ['workId', 'Obra relacionada', 'work'], ['paid', 'Estado de pago', 'select', false, ['Pendiente', 'Pagado']], ['notes', 'Notas', 'textarea', false, null, 'full']
     ],
     event: [
-      ['title', 'Título', 'text', true], ['date', 'Fecha', 'date', true], ['time', 'Hora', 'time'], ['kind', 'Tipo', 'select', false, ['Reunión', 'Llamada', 'Visita de obra', 'Entrega', 'Otro']], ['owner', 'Responsable', 'team'], ['clientId', 'Cliente', 'client'], ['workId', 'Obra', 'work'], ['notes', 'Notas', 'textarea', false, null, 'full']
+      ['title', 'Título', 'text', true], ['date', 'Fecha', 'date', true], ['time', 'Hora', 'time'], ['kind', 'Tipo', 'select', false, ['Reunión', 'Llamada', 'Visita de obra', 'Entrega', 'Otro']], ['owner', 'Responsable', 'team'], ['clientId', 'Cliente', 'client'], ['workId', 'Obra', 'work'], ['island', 'Isla', 'select', false, CANARY_ISLANDS], ['notes', 'Notas', 'textarea', false, null, 'full']
     ],
     document: [
       ['title', 'Nombre del documento', 'text', true], ['kind', 'Tipo', 'select', false, ['Contrato', 'Plano', 'Foto', 'Permiso', 'Acta', 'Factura', 'Otro']], ['url', 'Enlace al archivo', 'url', true, null, 'full'], ['clientId', 'Cliente', 'client'], ['workId', 'Obra relacionada', 'work'], ['notes', 'Notas', 'textarea', false, null, 'full']
@@ -769,7 +828,7 @@ notify pgrst, 'reload schema';`;
     else if (kind === 'select') {
       const list = choices || [];
       const selectedValue = name === 'paid' ? (value === true ? 'Pagado' : value === false ? 'Pendiente' : value) : name === 'active' ? (value === false ? 'Inactivo' : value === true ? 'Activo' : value) : value;
-      control = '<select id="' + id + '" name="' + name + '"' + req + '>' + list.map(x => '<option' + (String(selectedValue == null ? '' : selectedValue) === String(x) ? ' selected' : '') + '>' + esc(x) + '</option>').join('') + '</select>';
+      control = '<select id="' + id + '" name="' + name + '"' + req + '>' + (name === 'island' ? '<option value="">Sin especificar</option>' : '') + list.map(x => '<option value="' + esc(x) + '"' + (String(selectedValue == null ? '' : selectedValue) === String(x) ? ' selected' : '') + '>' + esc(x) + '</option>').join('') + '</select>';
     } else if (kind === 'client') control = '<select id="' + id + '" name="' + name + '"' + req + '>' + optionHtml(data.clients, value, 'Selecciona cliente') + '</select>';
     else if (kind === 'work') control = '<select id="' + id + '" name="' + name + '"' + req + '>' + optionHtml(data.works, value, 'Sin obra asociada') + '</select>';
     else if (kind === 'team') control = '<select id="' + id + '" name="' + name + '"' + req + '>' + optionHtml(personOption(), value, 'Sin asignar') + '</select>';
@@ -966,8 +1025,8 @@ notify pgrst, 'reload schema';`;
     if (!lead) return;
     if (lead.clientId) { setView('clients'); renderDetail('client', lead.clientId); return; }
     const time = nowIso();
-    const client = { id: uid(), name: lead.name || '', company: lead.company || lead.name || '', phone: lead.phone || '', email: lead.email || '', notes: lead.notes || '', createdAt: time, updatedAt: time, sourceLeadId: lead.id };
-    const work = createWork ? { id: uid(), name: lead.company ? 'Obra · ' + lead.company : 'Nueva obra · ' + lead.name, clientId: client.id, status: 'Pendiente', budget: num(lead.value), progress: 0, notes: 'Creada desde el lead. Completa dirección, fechas y alcance.', createdAt: time, updatedAt: time, sourceLeadId: lead.id } : null;
+    const client = { id: uid(), name: lead.name || '', company: lead.company || lead.name || '', phone: lead.phone || '', email: lead.email || '', island: lead.island || '', notes: lead.notes || '', createdAt: time, updatedAt: time, sourceLeadId: lead.id };
+    const work = createWork ? { id: uid(), name: lead.company ? 'Obra · ' + lead.company : 'Nueva obra · ' + lead.name, clientId: client.id, island: lead.island || '', status: 'Pendiente', budget: num(lead.value), progress: 0, notes: 'Creada desde el lead. Completa dirección, fechas y alcance.', createdAt: time, updatedAt: time, sourceLeadId: lead.id } : null;
     if (!commitChange(() => {
       data.clients.unshift(client);
       if (work) data.works.unshift(work);
@@ -992,6 +1051,23 @@ notify pgrst, 'reload schema';`;
     }
   }
 
+  function moveRecord(type, id, status) {
+    const record = type === 'lead' ? data.leads.find(item => item.id === id) : type === 'work' ? data.works.find(item => item.id === id) : null;
+    const allowed = STATUS[type];
+    if (!record || !allowed || !allowed.includes(status)) return;
+    const field = type === 'lead' ? 'stage' : 'status';
+    if (record[field] === status) return;
+    if (commitChange(() => {
+      record[field] = status;
+      if (type === 'lead' && status === 'Ganado' && !record.probability) record.probability = 100;
+      if (type === 'work' && status === 'Terminada') record.progress = 100;
+      record.updatedAt = nowIso();
+    })) {
+      render();
+      toast((type === 'lead' ? 'Lead' : 'Obra') + ' movido a «' + status + '».', 'good');
+    }
+  }
+
   function advanceLead(id) {
     const lead = data.leads.find(x => x.id === id);
     if (!lead) return;
@@ -1011,10 +1087,13 @@ notify pgrst, 'reload schema';`;
       preset.title = 'Seguimiento · ' + (lead.company || lead.name || 'oportunidad');
       preset.date = lead.nextDate || today;
       preset.kind = 'Llamada';
+      preset.island = lead.island || '';
       preset.notes = 'Seguimiento comercial de ' + (lead.company || lead.name || 'la oportunidad') + (lead.phone ? ' · Teléfono: ' + lead.phone : '');
     }
     const client = preset.clientId ? data.clients.find(x => x.id === preset.clientId) : null;
     const work = preset.workId ? data.works.find(x => x.id === preset.workId) : null;
+    if (type === 'work' && client && !preset.island) preset.island = client.island || '';
+    if (type === 'event' && !preset.island) preset.island = work ? work.island || '' : client ? client.island || '' : '';
     if (type === 'work' && client) preset.name = 'Obra · ' + (client.company || client.name);
     if (type === 'quote') preset.title = 'Presupuesto · ' + (work ? work.name : client ? (client.company || client.name) : '');
     if (type === 'task') preset.title = (work ? 'Trabajo · ' + work.name : client ? 'Tarea · ' + (client.company || client.name) : '');
@@ -1284,7 +1363,10 @@ notify pgrst, 'reload schema';`;
       if (t && commitChange(() => { t.status = t.status === 'Hecha' ? 'Pendiente' : 'Hecha'; t.updatedAt = nowIso(); })) render();
       return;
     }
+    if (action === 'toggle-view-mode') { const key = target.dataset.listKey; if (key && viewModes[key]) { viewModes[key] = target.dataset.viewMode === 'board' ? 'board' : 'list'; render(); } return; }
     if (action === 'settings-tab') { settingsTab = target.dataset.tab || 'empresa'; if (view !== 'settings') { setView('settings'); return; } render(); return; }
+    if (action === 'myday-shift') { const d = new Date((myDayDate || today) + 'T12:00:00'); d.setDate(d.getDate() + Number(target.dataset.delta || 0)); myDayDate = dateKey(d); render(); return; }
+    if (action === 'myday-today') { myDayDate = today; render(); return; }
     if (action === 'month-shift') { const d = new Date(agendaMonth + '-01T12:00:00'); d.setMonth(d.getMonth() + Number(target.dataset.delta || 0)); agendaMonth = dateKey(d).slice(0, 7); render(); return; }
     if (action === 'month-today') { agendaMonth = today.slice(0, 7); render(); return; }
     if (action === 'backup') { backup(); return; }
@@ -1345,6 +1427,20 @@ notify pgrst, 'reload schema';`;
   });
   document.addEventListener('change', (event) => {
     if (event.target.id === 'filter-select') { filterValue = event.target.value; render(); }
+    if (event.target.id === 'island-filter') { islandFilter = event.target.value || 'all'; render(); }
+    if (event.target.dataset.moveType) { moveRecord(event.target.dataset.moveType, event.target.dataset.id, event.target.value); return; }
+    if (event.target.form && event.target.form.id === 'entity-form' && event.target.name === 'island') event.target.dataset.inherited = 'false';
+    if (event.target.form && event.target.form.id === 'entity-form' && ['clientId', 'workId'].includes(event.target.name)) {
+      const form = event.target.form;
+      const island = $('[name="island"]', form);
+      if (island && (!island.value || island.dataset.inherited === 'true')) {
+        const relatedWork = event.target.name === 'workId' ? data.works.find(item => item.id === event.target.value) : null;
+        const relatedClientId = event.target.name === 'clientId' ? event.target.value : (relatedWork && relatedWork.clientId) || $('[name="clientId"]', form)?.value;
+        const relatedClient = data.clients.find(item => item.id === relatedClientId);
+        const inheritedIsland = (relatedWork && relatedWork.island) || (relatedClient && relatedClient.island) || '';
+        if (inheritedIsland) { island.value = inheritedIsland; island.dataset.inherited = 'true'; }
+      }
+    }
     if (event.target.id === 'restore-input') restoreFile(event.target.files && event.target.files[0]);
     if (event.target.matches('[data-quote-field="category"]')) {
       const row = event.target.closest('.quote-line-card');
