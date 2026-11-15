@@ -49,7 +49,7 @@ notify pgrst, 'reload schema';`;
   const STATUS = {
     lead: ['Nuevo', 'Contactado', 'Cualificado', 'Propuesta enviada', 'Ganado', 'Perdido'],
     work: ['Pendiente', 'Planificada', 'En curso', 'Pausada', 'Terminada', 'Cancelada'],
-    task: ['Pendiente', 'En curso', 'Hecha'],
+    task: ['Pendiente', 'En curso', 'En espera', 'En revisión', 'Hecha', 'Cancelada'],
     quote: ['Borrador', 'Enviada', 'Aceptada', 'Rechazada', 'Vencida'],
     invoice: ['Borrador', 'Emitida', 'Parcial', 'Pagada', 'Vencida']
   };
@@ -270,10 +270,11 @@ notify pgrst, 'reload schema';`;
     if (/ganado|terminada|hecha|pagada|aceptada/.test(s)) return 'green';
     if (/curso|enviada|emitida|parcial|cualificado/.test(s)) return 'blue';
     if (/vencid|perdid|cancelad|rechazad|pausad/.test(s)) return 'red';
-    if (/propuesta|contactado|planific|borrador/.test(s)) return 'yellow';
+    if (/propuesta|contactado|planific|borrador|espera|revisión|revision/.test(s)) return 'yellow';
     if (/nuevo|pendiente/.test(s)) return 'lime';
     return '';
   }
+  function isTaskOpen(task) { return !['Hecha', 'Cancelada'].includes(task && task.status); }
   function badge(status) { return '<span class="badge ' + statusClass(status) + '">' + esc(status || 'Sin estado') + '</span>'; }
   function selected(arr, id, empty) {
     const found = arr.find(x => String(x.id) === String(id));
@@ -289,10 +290,10 @@ notify pgrst, 'reload schema';`;
     $('#user-avatar').textContent = initials;
     $('#user-avatar-top').textContent = initials;
     $('#today-label').textContent = new Date().toLocaleDateString('es-ES', { weekday: 'short', day: 'numeric', month: 'short' });
-    const overdue = data.tasks.filter(t => t.status !== 'Hecha' && t.due && t.due < today).length;
+    const overdue = data.tasks.filter(t => isTaskOpen(t) && t.due && t.due < today).length;
     const leadsDue = data.leads.filter(l => l.stage !== 'Ganado' && l.stage !== 'Perdido' && l.nextDate && l.nextDate <= today).length;
-    const todayCount = data.tasks.filter(t => t.status !== 'Hecha' && t.due === today).length + data.events.filter(e => e.date === today).length + data.leads.filter(l => !['Ganado', 'Perdido'].includes(l.stage) && l.nextDate === today).length;
-    const incidentsDue = data.tasks.filter(t => t.category === 'Incidencia' && t.status !== 'Hecha').length;
+    const todayCount = data.tasks.filter(t => isTaskOpen(t) && t.due === today).length + data.events.filter(e => e.date === today).length + data.leads.filter(l => !['Ganado', 'Perdido'].includes(l.stage) && l.nextDate === today).length;
+    const incidentsDue = data.tasks.filter(t => t.category === 'Incidencia' && isTaskOpen(t)).length;
     const visitsDue = data.events.filter(e => e.kind === 'Visita de obra' && e.date >= today).length;
     $('#tasks-count').textContent = overdue ? String(overdue) : '';
     $('#leads-count').textContent = leadsDue ? String(leadsDue) : '';
@@ -337,7 +338,7 @@ notify pgrst, 'reload schema';`;
     const openLeads = data.leads.filter(l => !['Ganado', 'Perdido'].includes(l.stage));
     const weighted = openLeads.reduce((sum, l) => sum + num(l.value) * (Number(l.probability || defaultProbability(l.stage)) / 100), 0);
     const outstandingTotal = data.invoices.reduce((s, i) => s + outstanding(i), 0);
-    const dueTasks = data.tasks.filter(t => t.status !== 'Hecha' && t.due).sort((a, b) => a.due.localeCompare(b.due)).slice(0, 5);
+    const dueTasks = data.tasks.filter(t => isTaskOpen(t) && t.due).sort((a, b) => a.due.localeCompare(b.due)).slice(0, 5);
     const followups = data.leads.filter(l => l.stage !== 'Ganado' && l.stage !== 'Perdido' && l.nextDate).sort((a, b) => a.nextDate.localeCompare(b.nextDate)).slice(0, 5);
     const workRows = data.works.filter(w => !['Terminada', 'Cancelada'].includes(w.status)).sort((a, b) => (a.end || '9999').localeCompare(b.end || '9999')).slice(0, 4);
     const pipeline = STATUS.lead.slice(0, 4).map(stage => {
@@ -351,7 +352,7 @@ notify pgrst, 'reload schema';`;
       kpi('Oportunidades abiertas', openLeads.length, money(weighted) + ' valor ponderado', '✳') +
       kpi('Obras activas', activeWorks, data.works.length + ' obras registradas', '▦') +
       kpi('Pendiente de cobro', money(outstandingTotal), data.invoices.filter(i => outstanding(i) > 0).length + ' facturas abiertas', '€') +
-      kpi('Tareas abiertas', data.tasks.filter(t => t.status !== 'Hecha').length, dueTasks.filter(t => t.due && t.due < today).length + ' vencidas', '☷') + '</div>';
+      kpi('Tareas abiertas', data.tasks.filter(t => isTaskOpen(t)).length, dueTasks.filter(t => t.due && t.due < today).length + ' vencidas', '☷') + '</div>';
     const tasksContent = dueTasks.length ? '<div class="list">' + dueTasks.map(t => row(t.title, (workName(t.workId) || selected(data.clients, t.clientId) || 'Sin obra asignada') + ' · vence ' + dateFmt(t.due), t.status, '<span class="row-date">' + esc(dateFmt(t.due, { day: '2-digit', month: 'short' })) + '</span>', '', t.id, 'task')).join('') + '</div>' : empty('Sin tareas próximas', 'Crea tareas y asígnalas a una obra para tenerlas a mano.', 'task', 'Crear tarea');
     const leadContent = followups.length ? '<div class="list">' + followups.map(l => row(l.name || l.company, (l.company && l.name ? l.company + ' · ' : '') + 'seguimiento ' + dateFmt(l.nextDate), l.stage, '<span class="row-amount">' + esc(money(l.value)) + '</span>', '', l.id, 'lead')).join('') + '</div>' : empty('Sin seguimientos programados', 'Añade una fecha de seguimiento a un lead.', 'lead', 'Añadir lead');
     const worksContent = workRows.length ? '<div class="list">' + workRows.map(w => row(w.name, selected(data.clients, w.clientId) + (w.end ? ' · entrega ' + dateFmt(w.end) : ''), w.status, '<span class="row-amount">' + esc(money(w.budget)) + '</span>', '', w.id, 'work')).join('') + '</div>' : empty('Aún no hay obras', 'Las obras de tu empresa aparecerán aquí.', 'work', 'Crear obra');
@@ -361,11 +362,11 @@ notify pgrst, 'reload schema';`;
   }
 
   function renderAttention() {
-    const tasks = data.tasks.filter(t => t.status !== 'Hecha' && t.due && t.due <= today).map(t => ({ type: 'task', id: t.id, rank: t.due, title: t.title, detail: (t.due < today ? 'Tarea vencida' : 'Tarea para hoy') + ' · ' + (workName(t.workId) || selected(data.clients, t.clientId) || 'Sin obra') }));
+    const tasks = data.tasks.filter(t => isTaskOpen(t) && t.due && t.due <= today).map(t => ({ type: 'task', id: t.id, rank: t.due, title: t.title, detail: (t.due < today ? 'Tarea vencida' : 'Tarea para hoy') + ' · ' + (workName(t.workId) || selected(data.clients, t.clientId) || 'Sin obra') }));
     const leads = data.leads.filter(l => !['Ganado', 'Perdido'].includes(l.stage) && l.nextDate && l.nextDate <= today).map(l => ({ type: 'lead', id: l.id, rank: l.nextDate, title: l.name || l.company || 'Seguimiento comercial', detail: (l.nextDate < today ? 'Seguimiento atrasado' : 'Seguimiento para hoy') + (l.company && l.name ? ' · ' + l.company : '') }));
     const staleCutoff = dateKey(new Date(Date.now() - 7 * 86400000));
     const staleLeads = data.leads.filter(l => !['Ganado', 'Perdido'].includes(l.stage) && !l.nextDate && String(l.updatedAt || l.createdAt || '').slice(0, 10) <= staleCutoff).map(l => ({ type: 'lead', id: l.id, rank: String(l.updatedAt || l.createdAt || '').slice(0, 10), title: l.name || l.company || 'Oportunidad sin seguimiento', detail: 'Lead sin próximo paso' + (l.island ? ' · ' + l.island : '') }));
-    const urgentIncidents = data.tasks.filter(t => t.category === 'Incidencia' && t.status !== 'Hecha' && t.priority === 'Alta').map(t => ({ type: 'task', id: t.id, rank: t.due && t.due < today ? t.due : today, title: t.title || 'Incidencia urgente', detail: 'Incidencia de prioridad alta' + (t.due ? ' · vence ' + dateFmt(t.due) : '') }));
+    const urgentIncidents = data.tasks.filter(t => t.category === 'Incidencia' && isTaskOpen(t) && t.priority === 'Alta').map(t => ({ type: 'task', id: t.id, rank: t.due && t.due < today ? t.due : today, title: t.title || 'Incidencia urgente', detail: 'Incidencia de prioridad alta' + (t.due ? ' · vence ' + dateFmt(t.due) : '') }));
     const events = data.events.filter(e => e.date === today).map(e => ({ type: 'event', id: e.id, rank: e.date + (e.time || ''), title: e.title || 'Cita de hoy', detail: [e.time, e.kind, workName(e.workId) || selected(data.clients, e.clientId), e.island].filter(Boolean).join(' · ') }));
     const invoices = data.invoices.filter(i => outstanding(i) > 0 && i.due && i.due < today).map(i => ({ type: 'invoice', id: i.id, rank: i.due, title: i.title || 'Factura ' + i.number, detail: 'Factura vencida · ' + money(outstanding(i)) + ' pendiente' }));
     const dueWorks = data.works.filter(w => !['Terminada', 'Cancelada'].includes(w.status) && w.end && w.end >= today && w.end <= dateKey(new Date(Date.now() + 7 * 86400000))).map(w => ({ type: 'work', id: w.id, rank: w.end, title: w.name, detail: 'Fecha de entrega · ' + dateFmt(w.end) }));
@@ -392,10 +393,10 @@ notify pgrst, 'reload schema';`;
   function renderMyDay() {
     const day = myDayDate || today;
     const dayEnd = dateKey(new Date(new Date(day + 'T12:00:00').getTime() + 7 * 86400000));
-    const tasks = data.tasks.filter(t => t.status !== 'Hecha' && t.due && t.due <= day).sort((a, b) => a.due.localeCompare(b.due));
+    const tasks = data.tasks.filter(t => isTaskOpen(t) && t.due && t.due <= day).sort((a, b) => a.due.localeCompare(b.due));
     const events = data.events.filter(e => e.date === day).sort((a, b) => (a.time || '').localeCompare(b.time || ''));
     const leads = data.leads.filter(l => !['Ganado', 'Perdido'].includes(l.stage) && l.nextDate && l.nextDate <= day).sort((a, b) => a.nextDate.localeCompare(b.nextDate));
-    const upcoming = data.tasks.filter(t => t.status !== 'Hecha' && t.due > day && t.due <= dayEnd).sort((a, b) => a.due.localeCompare(b.due)).slice(0, 6);
+    const upcoming = data.tasks.filter(t => isTaskOpen(t) && t.due > day && t.due <= dayEnd).sort((a, b) => a.due.localeCompare(b.due)).slice(0, 6);
     const items = tasks.map(t => ({ type: 'task', id: t.id, time: t.due, when: dateFmt(t.due), title: t.title, detail: (t.due < day ? 'Vencida' : 'Para esta fecha') + ' · ' + (workName(t.workId) || selected(data.clients, t.clientId) || 'Sin obra asignada'), status: t.status }))
       .concat(events.map(e => ({ type: 'event', id: e.id, time: e.date + (e.time || '23:59'), when: e.time || 'Todo el día', title: e.title, detail: [e.kind, workName(e.workId) || selected(data.clients, e.clientId), e.island].filter(Boolean).join(' · '), status: e.kind || 'Cita' })))
       .concat(leads.map(l => ({ type: 'lead', id: l.id, time: l.nextDate, when: dateFmt(l.nextDate), title: l.name || l.company || 'Seguimiento comercial', detail: 'Seguimiento ' + (l.nextDate < day ? 'atrasado' : 'pendiente') + (l.company && l.name ? ' · ' + l.company : '') + (l.island ? ' · ' + l.island : ''), status: l.stage })))
@@ -436,7 +437,7 @@ notify pgrst, 'reload schema';`;
       maintenance: { category: 'Mantenimiento', title: 'Mantenimiento', eyebrow: 'POSTVENTA', description: 'Organiza revisiones preventivas y trabajos de mantenimiento.', singular: 'mantenimiento' },
       checklists: { category: 'Checklist', title: 'Checklists', eyebrow: 'CONTROL DE CALIDAD', description: 'Prepara listas de comprobación para que ninguna entrega se quede a medias.', singular: 'checklist' }
     }[page];
-    const tasks = data.tasks.filter(t => t.category === config.category).filter(t => !searchText || normalizeSearchText(JSON.stringify(t)).includes(normalizeSearchText(searchText))).slice().sort((a, b) => (a.status === 'Hecha') - (b.status === 'Hecha') || (a.due || '9999').localeCompare(b.due || '9999'));
+    const tasks = data.tasks.filter(t => t.category === config.category).filter(t => !searchText || normalizeSearchText(JSON.stringify(t)).includes(normalizeSearchText(searchText))).slice().sort((a, b) => Number(!isTaskOpen(a)) - Number(!isTaskOpen(b)) || (a.due || '9999').localeCompare(b.due || '9999'));
     const actions = newBtn('task', 'Nueva ' + config.singular, ' data-category="' + esc(config.category) + '"');
     const toolbar = '<div class="toolbar"><div class="search"><input id="search-input" type="search" value="' + esc(searchText) + '" placeholder="Buscar ' + config.title.toLocaleLowerCase('es') + '…" aria-label="Buscar ' + config.title + '"></div><span class="muted small">' + tasks.length + (tasks.length === 1 ? ' registro' : ' registros') + '</span></div>';
     const content = tasks.length ? '<div class="list">' + tasks.map(t => renderListRow('tasks', t)).join('') + '</div>' : empty(searchText ? 'No se encontraron resultados' : 'Todavía no hay ' + config.title.toLocaleLowerCase('es'), searchText ? 'Prueba con otra búsqueda.' : 'Crea el primero para organizar el seguimiento.', 'task', 'Crear ' + config.singular, ' data-category="' + esc(config.category) + '"');
@@ -446,10 +447,10 @@ notify pgrst, 'reload schema';`;
   function renderTeam() {
     const people = data.team.slice().sort((a, b) => (a.active === false) - (b.active === false) || String(a.name || '').localeCompare(String(b.name || ''), 'es'));
     const list = people.length ? '<div class="team-grid">' + people.map(p => '<article class="team-card"><div class="team-card-top"><span class="team-avatar">' + esc((p.name || '?').trim().split(/\s+/).slice(0, 2).map(x => x[0]).join('').toUpperCase()) + '</span><span class="team-state ' + (p.active === false ? 'inactive' : '') + '">' + (p.active === false ? 'Inactivo' : 'Activo') + '</span></div><h3>' + esc(p.name) + '</h3><p>' + esc(p.role || 'Sin puesto indicado') + '</p><div class="team-contact">' + (p.phone ? '<a href="tel:' + esc(p.phone) + '">' + esc(p.phone) + '</a>' : '') + (p.email ? '<a href="mailto:' + esc(p.email) + '">' + esc(p.email) + '</a>' : '') + '</div><div class="team-card-actions"><button type="button" class="btn btn-sm" data-action="detail" data-type="team" data-id="' + esc(p.id) + '">Ver ficha</button><button type="button" class="btn btn-sm" data-action="edit" data-type="team" data-id="' + esc(p.id) + '">Editar</button></div></article>').join('') + '</div>' : empty('Aún no has añadido a tu equipo', 'Añade las personas que participan en las obras y asígnalas después a tareas y visitas.', 'team', 'Añadir persona');
-    return header('OPERACIONES', 'Equipo', 'Responsables y colaboradores de tu empresa.', newBtn('team', 'Añadir persona')) + '<div class="team-summary">' + kpi('Personas activas', people.filter(p => p.active !== false).length, 'disponibles para asignación', '♧') + kpi('Obras con responsable', new Set(data.works.filter(w => w.owner).map(w => w.owner)).size, 'responsables asignados', '▦') + kpi('Tareas asignadas', data.tasks.filter(t => t.owner && t.status !== 'Hecha').length, 'trabajos abiertos', '☷') + '</div>' + card('Personas y colaboradores', list, people.length + ' fichas de equipo');
+    return header('OPERACIONES', 'Equipo', 'Responsables y colaboradores de tu empresa.', newBtn('team', 'Añadir persona')) + '<div class="team-summary">' + kpi('Personas activas', people.filter(p => p.active !== false).length, 'disponibles para asignación', '♧') + kpi('Obras con responsable', new Set(data.works.filter(w => w.owner).map(w => w.owner)).size, 'responsables asignados', '▦') + kpi('Tareas asignadas', data.tasks.filter(t => t.owner && isTaskOpen(t)).length, 'trabajos abiertos', '☷') + '</div>' + card('Personas y colaboradores', list, people.length + ' fichas de equipo');
   }
   function dashboardFocus() {
-    const openTasks = data.tasks.filter(task => task.status !== 'Hecha').sort((a, b) => (a.due || '9999').localeCompare(b.due || '9999'));
+    const openTasks = data.tasks.filter(task => isTaskOpen(task)).sort((a, b) => (a.due || '9999').localeCompare(b.due || '9999'));
     const openLeads = data.leads.filter(lead => !['Ganado', 'Perdido'].includes(lead.stage) && lead.nextDate).sort((a, b) => a.nextDate.localeCompare(b.nextDate));
     const overdueTask = openTasks.find(task => task.due && task.due < today);
     const dueLead = openLeads.find(lead => lead.nextDate <= today);
@@ -516,7 +517,7 @@ notify pgrst, 'reload schema';`;
         const itemIsland = item.island || (linkedClient && linkedClient.island) || (taskWork && taskWork.island) || '';
         const info = isLead
           ? [item.company && item.name ? item.company : '', item.island, item.nextDate ? 'Seguimiento ' + dateFmt(item.nextDate) : 'Sin próximo paso'].filter(Boolean).join(' · ')
-          : isTask ? [item.category || 'General', item.priority ? 'Prioridad ' + item.priority : '', item.due ? ((item.due < today && item.status !== 'Hecha') ? 'Vencida ' : 'Vence ') + dateFmt(item.due) : 'Sin fecha', workName(item.workId) || selected(data.clients, item.clientId)].filter(Boolean).join(' · ')
+          : isTask ? [item.category || 'General', item.priority ? 'Prioridad ' + item.priority : '', item.due ? ((item.due < today && isTaskOpen(item)) ? 'Vencida ' : 'Vence ') + dateFmt(item.due) : 'Sin fecha', workName(item.workId) || selected(data.clients, item.clientId)].filter(Boolean).join(' · ')
           : [selected(data.clients, item.clientId), itemIsland, item.end ? 'Entrega ' + dateFmt(item.end) : 'Sin fecha de entrega'].filter(Boolean).join(' · ');
         const amount = isLead ? money(item.value) : isTask ? '' : money(item.budget);
         const select = '<label class="kanban-move-label" for="move-' + type + '-' + esc(item.id) + '">Mover a</label><select class="kanban-move" id="move-' + type + '-' + esc(item.id) + '" data-move-type="' + type + '" data-id="' + esc(item.id) + '" aria-label="Mover ' + esc(title) + ' a otra fase">' + stages.map(option => '<option value="' + esc(option) + '"' + (option === stage ? ' selected' : '') + '>' + esc(option) + '</option>').join('') + '</select>';
@@ -536,7 +537,7 @@ notify pgrst, 'reload schema';`;
     if (q) items = items.filter(x => normalizeSearchText(JSON.stringify(x) + ' ' + clientName(x.clientId) + ' ' + workName(x.workId) + ' ' + teamName(x.owner)).includes(q));
     if (filterValue !== 'all') items = items.filter(x => [x.stage, x.status, x.priority, x.kind].includes(filterValue));
     if (islandFilter !== 'all' && ['leads', 'clients', 'works'].includes(key)) items = items.filter(x => (x.island || (key === 'works' ? (data.clients.find(client => client.id === x.clientId) || {}).island : '')) === islandFilter);
-    if (key === 'tasks') items.sort((a, b) => (a.status === 'Hecha') - (b.status === 'Hecha') || (a.due || '9999').localeCompare(b.due || '9999'));
+    if (key === 'tasks') items.sort((a, b) => Number(!isTaskOpen(a)) - Number(!isTaskOpen(b)) || (a.due || '9999').localeCompare(b.due || '9999'));
     else items.sort((a, b) => String(b.updatedAt || b.createdAt || '').localeCompare(String(a.updatedAt || a.createdAt || '')));
     const toolbar = '<div class="toolbar"><div class="search"><input id="search-input" type="search" value="' + esc(searchText) + '" placeholder="Buscar ' + esc(cfg.title.toLowerCase()) + '..." aria-label="Buscar ' + esc(cfg.title.toLowerCase()) + '"></div>' + (cfg.fields ? '<select id="filter-select" aria-label="Filtrar por estado"><option value="all">Todos los estados</option>' + STATUS[cfg.filter].map(s => '<option value="' + esc(s) + '"' + (filterValue === s ? ' selected' : '') + '>' + esc(s) + '</option>').join('') + (key === 'tasks' ? '<option value="Alta"' + (filterValue === 'Alta' ? ' selected' : '') + '>Alta</option><option value="Media"' + (filterValue === 'Media' ? ' selected' : '') + '>Media</option><option value="Baja"' + (filterValue === 'Baja' ? ' selected' : '') + '>Baja</option>' : '') + '</select>' : '') + (['leads', 'clients', 'works'].includes(key) ? '<select id="island-filter" aria-label="Filtrar por isla">' + islandOptions(islandFilter) + '</select>' : '') + '<span class="muted small">' + items.length + (items.length === 1 ? ' registro' : ' registros') + '</span></div>';
     const hasBoard = ['leads', 'works', 'tasks'].includes(key);
@@ -555,7 +556,10 @@ notify pgrst, 'reload schema';`;
     }
     if (key === 'clients') return '<div class="row-item list-flow-row"><div class="row-main" data-action="detail" data-type="client" data-id="' + esc(x.id) + '"><div class="row-title">' + esc(x.company || x.name) + '</div><div class="row-sub">' + esc([x.name && x.company ? x.name : '', x.island, x.email, x.phone, data.works.filter(w => w.clientId === x.id).length + ' obras'].filter(Boolean).join(' · ')) + '</div></div><div class="row-end"><span class="row-date">' + esc(x.city || '') + '</span><button type="button" class="btn btn-sm" data-action="quick-new" data-type="work" data-client-id="' + esc(x.id) + '">＋ Crear obra</button></div></div>';
     if (key === 'works') return '<div class="row-item list-flow-row"><div class="row-main" data-action="detail" data-type="work" data-id="' + esc(x.id) + '"><div class="row-title">' + esc(x.name) + badge(x.status) + '</div><div class="row-sub">' + esc(selected(data.clients, x.clientId) + (x.island ? ' · ' + x.island : '') + (x.address ? ' · ' + x.address : '') + (x.end ? ' · entrega ' + dateFmt(x.end) : '')) + '</div><div class="progress" style="margin-top:8px"><i style="width:' + Math.min(100, Math.max(0, num(x.progress))) + '%"></i></div></div><div class="row-end"><div class="row-value-block"><div class="row-amount">' + esc(money(x.budget)) + '</div><div class="row-date">' + esc(Math.round(num(x.progress)) + '% completado') + '</div></div><div class="row-quick-actions"><button type="button" class="btn btn-sm" data-action="quick-new" data-type="task" data-client-id="' + esc(x.clientId || '') + '" data-work-id="' + esc(x.id) + '">＋ Tarea</button><button type="button" class="btn btn-sm" data-action="quick-new" data-type="quote" data-client-id="' + esc(x.clientId || '') + '" data-work-id="' + esc(x.id) + '">Presupuesto</button></div></div></div>';
-    if (key === 'tasks') return '<div class="row-item"><button class="tiny-btn ' + (x.status === 'Hecha' ? '' : 'danger') + '" data-action="toggle-task" data-id="' + esc(x.id) + '" aria-label="' + (x.status === 'Hecha' ? 'Reabrir' : 'Marcar hecha') + '">' + (x.status === 'Hecha' ? '✓' : '○') + '</button><div class="row-main" data-action="detail" data-type="task" data-id="' + esc(x.id) + '"><div class="row-title">' + esc(x.title) + badge(x.status) + badge(x.category || 'General') + badge(x.priority || 'Media') + '</div><div class="row-sub">' + esc(workName(x.workId) || selected(data.clients, x.clientId) || 'Sin proyecto') + (x.owner ? ' · ' + teamName(x.owner) : '') + '</div></div><div class="row-end"><span class="row-date">' + esc(x.due ? 'Vence ' + dateFmt(x.due) : 'Sin fecha') + '</span></div></div>';
+    if (key === 'tasks') {
+      const completed = !isTaskOpen(x);
+      return '<div class="row-item"><button class="tiny-btn ' + (completed ? '' : 'danger') + '" data-action="toggle-task" data-id="' + esc(x.id) + '" aria-label="' + (completed ? 'Reabrir' : 'Marcar hecha') + '">' + (completed ? '✓' : '○') + '</button><div class="row-main" data-action="detail" data-type="task" data-id="' + esc(x.id) + '"><div class="row-title">' + esc(x.title) + badge(x.status) + badge(x.category || 'General') + badge(x.priority || 'Media') + '</div><div class="row-sub">' + esc(workName(x.workId) || selected(data.clients, x.clientId) || 'Sin proyecto') + (x.owner ? ' · ' + teamName(x.owner) : '') + '</div></div><div class="row-end"><span class="row-date">' + esc(x.due ? 'Vence ' + dateFmt(x.due) : 'Sin fecha') + '</span></div></div>';
+    }
     if (key === 'quotes') return row(x.title || ('Presupuesto ' + x.number), selected(data.clients, x.clientId) + (x.workId ? ' · ' + workName(x.workId) : '') + (x.validUntil ? ' · válido hasta ' + dateFmt(x.validUntil) : ''), x.status, amountEnd(total(x), dateFmt(x.date)), '', x.id, 'quote');
     return '<div class="row-item" data-action="detail" data-type="document" data-id="' + esc(x.id) + '"><div class="row-main"><div class="row-title">' + esc(x.title) + badge(x.kind || 'Documento') + '</div><div class="row-sub">' + esc(workName(x.workId) || selected(data.clients, x.clientId) || 'Sin asociar') + (x.notes ? ' · ' + esc(x.notes) : '') + '</div></div><div class="row-end"><a class="document-link btn btn-sm" href="' + esc(safeHref(x.url)) + '" target="_blank" rel="noopener">Abrir ↗</a><div class="row-actions"><button class="tiny-btn" data-action="edit" data-type="document" data-id="' + esc(x.id) + '">Editar</button><button class="tiny-btn danger" data-action="delete" data-type="document" data-id="' + esc(x.id) + '">Eliminar</button></div></div></div>';
   }
@@ -587,7 +591,7 @@ notify pgrst, 'reload schema';`;
     const next = new Date(d0.getFullYear(), d0.getMonth() + 1, 1);
     const end = dateKey(new Date(next.getTime() - 86400000));
     const events = data.events.filter(e => e.date >= start && e.date <= end).map(e => Object.assign({ _kind: 'event' }, e));
-    const tasks = data.tasks.filter(t => t.status !== 'Hecha' && t.due >= start && t.due <= end).map(t => Object.assign({ _kind: 'task', date: t.due, title: t.title, owner: t.owner, linkId: t.id }));
+    const tasks = data.tasks.filter(t => isTaskOpen(t) && t.due >= start && t.due <= end).map(t => Object.assign({ _kind: 'task', date: t.due, title: t.title, owner: t.owner, linkId: t.id }));
     const leads = data.leads.filter(l => l.nextDate && l.nextDate >= start && l.nextDate <= end && !['Ganado', 'Perdido'].includes(l.stage)).map(l => ({ id: l.id, _kind: 'lead', date: l.nextDate, title: 'Seguimiento · ' + (l.company || l.name), notes: l.phone || l.email }));
     const all = events.concat(tasks, leads).sort((a, b) => (a.date + (a.time || '')).localeCompare(b.date + (b.time || '')));
     const groups = new Map();
@@ -597,7 +601,7 @@ notify pgrst, 'reload schema';`;
     return header('PLANIFICACIÓN', 'Agenda', 'Citas, fechas de entrega, tareas y seguimientos comerciales.', newBtn('event', 'Nueva cita')) +
       '<section class="card"><div class="card-head"><div><h2>' + esc(monthLabel) + '</h2><p>Vista mensual de los próximos pasos</p></div><div class="head-actions"><button class="btn btn-sm" data-action="month-shift" data-delta="-1">←</button><button class="btn btn-sm" data-action="month-today">Hoy</button><button class="btn btn-sm" data-action="month-shift" data-delta="1">→</button></div></div>' + body + '</section>';
   }
-  function upcomingCount() { return data.events.filter(e => e.date >= today).length + data.tasks.filter(t => t.status !== 'Hecha' && t.due === today).length; }
+  function upcomingCount() { return data.events.filter(e => e.date >= today).length + data.tasks.filter(t => isTaskOpen(t) && t.due === today).length; }
 
   function renderReports() {
     const month = today.slice(0, 7);
@@ -611,7 +615,7 @@ notify pgrst, 'reload schema';`;
     const workRows = data.works.length ? '<div class="table-wrap"><table><thead><tr><th>Obra</th><th>Cliente</th><th>Estado</th><th class="numeric">Presupuesto</th><th class="numeric">Avance</th><th class="numeric">Gastos</th></tr></thead><tbody>' + data.works.map(w => '<tr><td><strong>' + esc(w.name) + '</strong></td><td>' + esc(selected(data.clients, w.clientId)) + '</td><td>' + badge(w.status) + '</td><td class="numeric">' + esc(money(w.budget)) + '</td><td class="numeric">' + esc(num(w.progress) + '%') + '</td><td class="numeric">' + esc(money(data.expenses.filter(e => e.workId === w.id).reduce((s, e) => s + num(e.amount), 0))) + '</td></tr>').join('') + '</tbody></table></div>' : empty('Sin obras para analizar', 'Crea obras para consultar su presupuesto y costes.', 'work', 'Crear obra');
     return header('ANÁLISIS', 'Informes', 'Una lectura rápida del estado comercial y financiero.', '<button class="btn" data-action="print">Imprimir / PDF</button><button class="btn" data-action="export-report">Exportar CSV</button>') +
       '<div class="kpis">' + kpi('Leads activos', open.length, money(open.reduce((s, x) => s + num(x.value), 0)) + ' de valor potencial', '✳') + kpi('Conversión ganada', win.length + (data.leads.length ? ' / ' + data.leads.length : ''), data.leads.length ? Math.round(win.length / data.leads.length * 100) + '% del total' : 'Sin leads todavía', '↗') + kpi('Facturado acumulado', money(billed), money(collected) + ' cobrado', '€') + kpi('Gastos registrados', money(expenses), money(monthCosts) + ' este mes', '↘') + '</div>' +
-      '<div class="grid-2 grid-even">' + card('Actividad financiera · ' + monthFmt(month), '<div class="list">' + row('Facturado este mes', 'Base imponible más impuestos', '', '<span class="row-amount">' + esc(money(monthBilled)) + '</span>') + row('Gastos este mes', 'Costes registrados', '', '<span class="row-amount">' + esc(money(monthCosts)) + '</span>') + row('Margen estimado', 'Facturación menos gastos del mes', '', '<span class="row-amount">' + esc(money(monthBilled - monthCosts)) + '</span>') + '</div>', 'Importes según los registros disponibles') + card('Datos de la empresa', '<div class="list">' + row('Clientes', String(data.clients.length), '', '') + row('Obras activas', String(data.works.filter(w => w.status === 'En curso').length), '', '') + row('Tareas pendientes', String(data.tasks.filter(t => t.status !== 'Hecha').length), '', '') + row('Presupuestos enviados', String(data.quotes.filter(q => q.status === 'Enviada').length), '', '') + '</div>', 'Actividad registrada') + '</div><div style="margin-top:14px">' + card('Rentabilidad por obra', workRows, 'Presupuesto frente a gastos asociados') + '</div>';
+      '<div class="grid-2 grid-even">' + card('Actividad financiera · ' + monthFmt(month), '<div class="list">' + row('Facturado este mes', 'Base imponible más impuestos', '', '<span class="row-amount">' + esc(money(monthBilled)) + '</span>') + row('Gastos este mes', 'Costes registrados', '', '<span class="row-amount">' + esc(money(monthCosts)) + '</span>') + row('Margen estimado', 'Facturación menos gastos del mes', '', '<span class="row-amount">' + esc(money(monthBilled - monthCosts)) + '</span>') + '</div>', 'Importes según los registros disponibles') + card('Datos de la empresa', '<div class="list">' + row('Clientes', String(data.clients.length), '', '') + row('Obras activas', String(data.works.filter(w => w.status === 'En curso').length), '', '') + row('Tareas pendientes', String(data.tasks.filter(t => isTaskOpen(t)).length), '', '') + row('Presupuestos enviados', String(data.quotes.filter(q => q.status === 'Enviada').length), '', '') + '</div>', 'Actividad registrada') + '</div><div style="margin-top:14px">' + card('Rentabilidad por obra', workRows, 'Presupuesto frente a gastos asociados') + '</div>';
   }
 
   function renderSettings() {
@@ -1360,7 +1364,7 @@ notify pgrst, 'reload schema';`;
     if (action === 'payment') { openPayment(target.dataset.id); return; }
     if (action === 'toggle-task') {
       const t = data.tasks.find(x => x.id === target.dataset.id);
-      if (t && commitChange(() => { t.status = t.status === 'Hecha' ? 'Pendiente' : 'Hecha'; t.updatedAt = nowIso(); })) render();
+      if (t && commitChange(() => { t.status = isTaskOpen(t) ? 'Hecha' : 'Pendiente'; t.updatedAt = nowIso(); })) render();
       return;
     }
     if (action === 'toggle-view-mode') { const key = target.dataset.listKey; if (key && viewModes[key]) { viewModes[key] = target.dataset.viewMode === 'board' ? 'board' : 'list'; render(); } return; }

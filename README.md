@@ -14,6 +14,7 @@ Laboral, pero conserva sus registros en una tabla separada.
 - Clientes convertibles desde un lead y con varias obras asociadas.
 - Obras con fechas, presupuesto, estado, avance y responsable.
 - Tareas por obra o cliente, con prioridades y vencimientos.
+- Estados de tarea diferenciados: pendiente, en curso, en espera, en revisión, hecha y cancelada; las tareas cerradas dejan de contar como abiertas o vencidas.
 - Mi día con navegación por fecha y resumen de tareas, visitas y seguimientos; incidencias, mantenimiento y checklists organizados sobre las tareas existentes.
 - Agenda de visitas, citas, tareas y seguimientos.
 - Panel operativo con alertas, actividad reciente, pipeline y accesos rápidos.
