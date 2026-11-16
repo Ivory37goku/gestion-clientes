@@ -1,5 +1,7 @@
 node_modules/
 desktop-dist/
+downloads/*.exe
+downloads/*.exe.blockmap
 android-app/.gradle/
 android-app/.idea/
 android-app/build/

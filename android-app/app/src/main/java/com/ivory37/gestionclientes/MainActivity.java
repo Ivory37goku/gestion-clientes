@@ -35,6 +35,7 @@ import android.widget.TextView;
 
 import androidx.webkit.WebViewAssetLoader;
 
+import java.io.ByteArrayInputStream;
 import java.io.OutputStream;
 
 public final class MainActivity extends Activity {
@@ -43,6 +44,7 @@ public final class MainActivity extends Activity {
     private static final String LOCAL_URL = "https://" + LOCAL_HOST + LOCAL_PREFIX + "index.html";
     private static final String HOSTED_HOST = "ivory37goku.github.io";
     private static final String HOSTED_PREFIX = "/gestion-clientes/";
+    private static final String GRAFCAN_EMBED_HOST = "visor-incrustable.devops.grafcan.es";
     private static final String HOSTED_URL = "https://" + HOSTED_HOST + HOSTED_PREFIX;
     private static final String CHANNEL_ID = "gestion_clientes_reminders";
     private static final String BRIDGE_PREFS = "gestion_clientes_android_bridge";
@@ -148,7 +150,11 @@ public final class MainActivity extends Activity {
 
             @Override
             public android.webkit.WebResourceResponse shouldInterceptRequest(WebView view, WebResourceRequest request) {
-                return assetLoader.shouldInterceptRequest(request.getUrl());
+                Uri uri = request.getUrl();
+                if (!request.isForMainFrame() && GRAFCAN_EMBED_HOST.equalsIgnoreCase(uri.getHost())) {
+                    return new android.webkit.WebResourceResponse("text/plain", "UTF-8", new ByteArrayInputStream(new byte[0]));
+                }
+                return assetLoader.shouldInterceptRequest(uri);
             }
 
             @Override

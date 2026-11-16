@@ -298,6 +298,9 @@ notify pgrst, 'reload schema';`;
   let cloudEmailDraft = '';
   let syncTimer = null;
   let cloudBusy = false;
+  let cloudSyncPending = false;
+  let cloudSyncPendingForce = false;
+  let cloudRefreshPending = false;
   let settingsTab = 'empresa';
   let agendaMonth = today.slice(0, 7);
   let myDayDate = today;
@@ -865,6 +868,7 @@ notify pgrst, 'reload schema';`;
   }
 
   function render() {
+    cloudRefreshPending = false;
     applyBranding();
     document.title = (normalizeBranding(data.company.branding).appName || data.company.name || 'Gestión Clientes') + ' · ' + (TITLES[view] || 'Gestión');
     $('#company-name-side').textContent = data.company.name || 'Mi empresa';
@@ -1580,7 +1584,10 @@ notify pgrst, 'reload schema';`;
     const leadSyncAction = isLead && leadTargets && leadTargets.related.length && Object.values(leadClientValues(item)).some(value => value != null && value !== '')
       ? '<button type="button" class="btn btn-sm" data-action="sync-lead-location" data-id="' + esc(item.id) + '">Sincronizar datos con cliente y obras</button>' : '';
     const leadSyncNote = isLead && leadTargets && leadTargets.related.length ? ' Los cambios del lead se copian automáticamente a las fichas vinculadas; puedes forzar la sincronización con este botón.' : '';
-    return '<section class="location-panel"><div class="location-panel-head"><div><p class="eyebrow">UBICACIÓN Y CONTACTO</p><h3>' + esc(destination) + '</h3><p>' + esc(locationText || note) + '</p></div>' + (client ? '<span class="badge">' + esc(client.company || client.name || 'Cliente') + '</span>' : '') + '</div>' + mapActions + (leadSyncAction ? '<div class="location-actions location-sync-actions">' + leadSyncAction + '</div>' : '') + '<iframe class="grafcan-frame" src="' + esc(grafcanViewerUrl(mapRecord, island)) + '" title="Mapa de GRAFCAN · ' + esc(destination) + '" loading="lazy" referrerpolicy="strict-origin-when-cross-origin" allowfullscreen></iframe><p class="location-note">' + esc(note) + ' Los enlaces de ruta y aviso se abren en la aplicación correspondiente; el WhatsApp queda preparado para que lo revises y lo envíes.' + esc(leadSyncNote) + '</p></section>';
+    const mapEmbed = window.AndroidBridge
+      ? '<p class="location-map-note">En Android, abre GRAFCAN con el botón superior para mantener protegidos los datos de la aplicación.</p>'
+      : '<iframe class="grafcan-frame" src="' + esc(grafcanViewerUrl(mapRecord, island)) + '" title="Mapa de GRAFCAN · ' + esc(destination) + '" loading="lazy" referrerpolicy="strict-origin-when-cross-origin" allowfullscreen></iframe>';
+    return '<section class="location-panel"><div class="location-panel-head"><div><p class="eyebrow">UBICACIÓN Y CONTACTO</p><h3>' + esc(destination) + '</h3><p>' + esc(locationText || note) + '</p></div>' + (client ? '<span class="badge">' + esc(client.company || client.name || 'Cliente') + '</span>' : '') + '</div>' + mapActions + (leadSyncAction ? '<div class="location-actions location-sync-actions">' + leadSyncAction + '</div>' : '') + mapEmbed + '<p class="location-note">' + esc(note) + ' Los enlaces de ruta y aviso se abren en la aplicación correspondiente; el WhatsApp queda preparado para que lo revises y lo envíes.' + esc(leadSyncNote) + '</p></section>';
   }
 
   function renderSolarStudyPanel(work, workId) {
@@ -2161,7 +2168,11 @@ notify pgrst, 'reload schema';`;
     if (type === 'document') { add('Tipo', item.kind); add('Relacionado con', workName(item.workId) || selected(data.clients, item.clientId)); add('Enlace', item.url); add('Notas', item.notes); }
     if (type === 'team') { add('Puesto', item.role); add('Correo', item.email); add('Teléfono', item.phone); add('Estado', item.active === false ? 'Inactivo' : 'Activo'); }
     if (type === 'payment') { add('Factura', selected(data.invoices, item.invoiceId)); add('Fecha', dateFmt(item.date)); add('Método', item.method); add('Importe', money(item.amount)); add('Notas', item.notes); }
-    const extraActions = type === 'lead' && !item.clientId && item.stage !== 'Perdido' ? '<button type="button" class="btn btn-primary btn-sm" data-action="convert-lead" data-id="' + esc(id) + '">Pasar a cliente</button>' : type === 'quote' ? '<button class="btn btn-sm" data-action="print">Imprimir / guardar PDF</button><button type="button" class="btn btn-sm" data-action="share-quote" data-id="' + esc(id) + '">Vista de cliente / compartir</button>' + (item.status !== 'Rechazada' ? '<button class="btn btn-primary btn-sm" data-action="quote-to-invoice" data-id="' + esc(id) + '">Crear factura</button>' : '') : type === 'invoice' ? '<button class="btn btn-sm" data-action="print">Imprimir / guardar PDF</button>' + (outstanding(item) > 0 ? '<button class="btn btn-primary btn-sm" data-action="payment" data-id="' + esc(id) + '">Registrar cobro</button>' : '') : '';
+    const linkedInvoice = type === 'quote' ? data.invoices.find(invoice => invoice.sourceQuoteId === item.id) : null;
+    const quoteInvoiceAction = type !== 'quote' ? '' : linkedInvoice
+      ? '<button type="button" class="btn btn-primary btn-sm" data-action="detail" data-type="invoice" data-id="' + esc(linkedInvoice.id) + '">Abrir factura</button>'
+      : item.status !== 'Rechazada' ? '<button type="button" class="btn btn-primary btn-sm" data-action="quote-to-invoice" data-id="' + esc(id) + '">Crear factura</button>' : '';
+    const extraActions = type === 'lead' && !item.clientId && item.stage !== 'Perdido' ? '<button type="button" class="btn btn-primary btn-sm" data-action="convert-lead" data-id="' + esc(id) + '">Pasar a cliente</button>' : type === 'quote' ? '<button class="btn btn-sm" data-action="print">Imprimir / guardar PDF</button><button type="button" class="btn btn-sm" data-action="share-quote" data-id="' + esc(id) + '">Vista de cliente / compartir</button>' + quoteInvoiceAction : type === 'invoice' ? '<button class="btn btn-sm" data-action="print">Imprimir / guardar PDF</button>' + (outstanding(item) > 0 ? '<button class="btn btn-primary btn-sm" data-action="payment" data-id="' + esc(id) + '">Registrar cobro</button>' : '') : '';
     const breakdown = type === 'quote' ? quoteBreakdown(item) : type === 'invoice' && Array.isArray(item.items) && item.items.length ? quoteBreakdown(item) : '';
     const materialsMarkup = type === 'quote' ? quoteMaterialsMarkup(item) : '';
     const internalProfit = ['quote', 'invoice'].includes(type) ? quoteProfitSummaryMarkup() : '';
@@ -2842,7 +2853,9 @@ notify pgrst, 'reload schema';`;
     if (!collection) return;
     if (type === 'payment') {
       const invoice = data.invoices.find(x => x.id === values.invoiceId);
-      if (!invoice || values.amount <= 0 || values.amount > outstanding(invoice) + 0.005) {
+      const existingPayment = form.dataset.id ? data.payments.find(payment => payment.id === form.dataset.id) : null;
+      const previousAmountOnInvoice = existingPayment && existingPayment.invoiceId === values.invoiceId ? num(existingPayment.amount) : 0;
+      if (!invoice || values.amount <= 0 || values.amount > outstanding(invoice) + previousAmountOnInvoice + 0.005) {
         toast('Indica un cobro mayor que cero y no superior al saldo pendiente.', 'bad');
         return;
       }
@@ -3049,6 +3062,12 @@ notify pgrst, 'reload schema';`;
   function quoteToInvoice(id) {
     const q = data.quotes.find(x => x.id === id);
     if (!q) return;
+    const existingInvoice = data.invoices.find(invoice => invoice.sourceQuoteId === q.id);
+    if (existingInvoice) {
+      renderDetail('invoice', existingInvoice.id);
+      toast('Este presupuesto ya tiene una factura vinculada. He abierto la existente.', 'good');
+      return;
+    }
     const previousQuote = clone(q);
     const time = nowIso();
     const invoice = { id: uid(), title: q.title, number: '', clientId: q.clientId, workId: q.workId, date: today, due: '', amount: num(q.amount), items: Array.isArray(q.items) ? clone(q.items) : [], taxName: q.taxName || data.company.taxName || 'IGIC', taxRate: num(q.taxRate), status: 'Borrador', notes: q.notes || 'Creada desde presupuesto ' + (q.number || q.title), createdAt: time, updatedAt: time, sourceQuoteId: q.id };
@@ -3080,7 +3099,7 @@ notify pgrst, 'reload schema';`;
         if (!old || String(item.updatedAt || item.createdAt || '') > String(old.updatedAt || old.createdAt || '')) map.set(item.id, item);
       });
       const deletes = Object.assign({}, (local._meta && local._meta.deleted && local._meta.deleted[c]) || {}, (remote._meta && remote._meta.deleted && remote._meta.deleted[c]) || {});
-      result[c] = Array.from(map.values()).filter(item => Number(deletes[item.id] || 0) <= new Date(item.updatedAt || item.createdAt || 0).getTime());
+      result[c] = Array.from(map.values()).filter(item => Number(deletes[item.id] || 0) < new Date(item.updatedAt || item.createdAt || 0).getTime());
       result._meta.deleted[c] = deletes;
     });
     const localUpdated = Number(local._meta && local._meta.companyUpdated || 0);
@@ -3135,8 +3154,14 @@ notify pgrst, 'reload schema';`;
     $('#sync-label').textContent = state === 'busy' ? 'Sincronizando…' : state === 'error' ? 'Error de sincronización' : cloudUser ? 'Nube conectada' : 'Guardado en este dispositivo';
   }
   async function syncCloud(force) {
-    if (!supa || !cloudUser || cloudBusy || !navigator.onLine) return;
+    if (!supa || !cloudUser || !navigator.onLine) return;
+    if (cloudBusy) {
+      cloudSyncPending = true;
+      cloudSyncPendingForce = cloudSyncPendingForce || !!force;
+      return;
+    }
     cloudBusy = true; updateCloudPill('busy');
+    const previousData = JSON.stringify(data);
     try {
       const result = await supa.from(CLOUD_TABLE).select('payload,updated_at').eq('user_id', cloudUser.id).maybeSingle();
       if (result.error) throw result.error;
@@ -3152,7 +3177,10 @@ notify pgrst, 'reload schema';`;
       mirrorBridgeStorage();
       updateCloudPill('ok');
       if (force) toast('Sincronización completada.', 'good');
-      if (view === 'settings') render();
+      if (JSON.stringify(data) !== previousData) {
+        if ($('#modal-root').children.length) cloudRefreshPending = true;
+        else render();
+      }
     } catch (err) {
       console.error('Error de sincronización:', err);
       cloudProblem = cloudErrorMessage(err);
@@ -3160,8 +3188,19 @@ notify pgrst, 'reload schema';`;
       cloudSetupRequired = code === 'pgrst205' || code === '42p01' || /could not find the table|relation .* does not exist/i.test(String(err && err.message || ''));
       updateCloudPill('error');
       if (force) toast(cloudProblem, 'bad');
-      if (view === 'settings') render();
-    } finally { cloudBusy = false; }
+      if (view === 'settings') {
+        if ($('#modal-root').children.length) cloudRefreshPending = true;
+        else render();
+      }
+    } finally {
+      cloudBusy = false;
+      if (cloudSyncPending && supa && cloudUser && navigator.onLine) {
+        const pendingForce = cloudSyncPendingForce;
+        cloudSyncPending = false;
+        cloudSyncPendingForce = false;
+        setTimeout(() => syncCloud(pendingForce), 0);
+      }
+    }
   }
 
   async function cloudLogin(form, mode) {
@@ -3297,7 +3336,7 @@ notify pgrst, 'reload schema';`;
     if (action === 'brand-reset') { render(); toast('Cambios de marca descartados.', 'good'); return; }
     if (action === 'brand-download-icon') { const form = $('#branding-form'); if (form) downloadBrandIcon(readBrandingDraft(form)); return; }
     if (action === 'close-sidebar') { $('#sidebar').classList.remove('open'); return; }
-    if (action === 'close-modal') { $('#modal-root').innerHTML = ''; return; }
+    if (action === 'close-modal') { $('#modal-root').innerHTML = ''; if (cloudRefreshPending) render(); return; }
     if (action === 'show-all-quote-catalog') {
       const form = target.closest('form');
       const group = $('[data-catalog-group]', form);
@@ -3330,7 +3369,7 @@ notify pgrst, 'reload schema';`;
       }
       return;
     }
-    if (action === 'backdrop' && target === $('.modal-backdrop')) { $('#modal-root').innerHTML = ''; return; }
+    if (action === 'backdrop' && target === $('.modal-backdrop')) { $('#modal-root').innerHTML = ''; if (cloudRefreshPending) render(); return; }
     if (action === 'new') { openForm(target.dataset.type, null, { category: target.dataset.category, kind: target.dataset.kind }); return; }
     if (action === 'quick-new') { openQuickNew(target); return; }
     if (action === 'edit') { openForm(target.dataset.type, target.dataset.id); return; }
