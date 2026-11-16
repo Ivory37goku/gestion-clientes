@@ -69,6 +69,7 @@ notify pgrst, 'reload schema';`;
     market: { label: 'GreenExperts · desglose residencial fotovoltaico 2026', url: 'https://greenexperts.es/guia-precios/placas-solares/precio-instalacion-fotovoltaica-5-kw/' },
     prices: { label: 'GreenExperts · desglose fotovoltaico 2026', url: 'https://greenexperts.es/guia-precios/placas-solares/instalar-placas-solares/' },
     cype: { label: 'CYPE · coste directo de mano de obra', url: 'https://www.generadordeprecios.info/obra_nueva/Instalaciones/Electricas/Puesta_a_tierra/Red_de_equipotencialidad.html' },
+    coelca: { label: 'Coelca · tarifa de compra de la empresa', url: 'https://coelca.es/175-energia-solar' },
     preoc: { label: 'PREOC 2026 · módulo fotovoltaico 450 Wp instalado', url: 'https://www.preoc.es/base_de_precios/D45AG160/PANEL%20ERA%20450W%2024V%20MONOCRISTALINO%20PERC' },
     travel: { label: 'Tarifa publicada en Tenerife · consulta noviembre 2026', url: 'https://okservice.es/servicios/energias-renovables-tenerife' }
   };
@@ -172,7 +173,18 @@ notify pgrst, 'reload schema';`;
   const dateKey = (d) => { const x = d || new Date(); return x.getFullYear() + '-' + String(x.getMonth() + 1).padStart(2, '0') + '-' + String(x.getDate()).padStart(2, '0'); };
   const today = dateKey();
   const money = (v) => new Intl.NumberFormat('es-ES', { style: 'currency', currency: 'EUR' }).format(Number(v) || 0);
-  const num = (v) => { const n = Number(String(v == null ? '' : v).replace(',', '.')); return Number.isFinite(n) ? n : 0; };
+  const parsedNumber = (v) => {
+    let value = String(v == null ? '' : v).trim().replace(/[\s€]/g, '');
+    if (!value) return null;
+    if (!/^-?[\d.,]+$/.test(value)) return null;
+    const comma = value.lastIndexOf(',');
+    const dot = value.lastIndexOf('.');
+    if (comma >= 0 && dot >= 0) value = comma > dot ? value.replace(/\./g, '').replace(',', '.') : value.replace(/,/g, '');
+    else if (comma >= 0) value = value.replace(/,/g, '.');
+    const parsed = Number(value);
+    return Number.isFinite(parsed) ? parsed : null;
+  };
+  const num = (v) => parsedNumber(v) == null ? 0 : parsedNumber(v);
   const dateFmt = (v, options) => { if (!v) return '—'; const d = new Date(String(v).slice(0, 10) + 'T12:00:00'); return Number.isNaN(d.getTime()) ? '—' : d.toLocaleDateString('es-ES', options || { day: '2-digit', month: 'short', year: 'numeric' }); };
   const safeHref = (value) => { try { const u = new URL(String(value || ''), location.href); return ['https:', 'http:', 'mailto:'].includes(u.protocol) ? u.href : '#'; } catch (_) { return '#'; } };
   const monthFmt = (v) => v ? new Date(v + '-01T12:00:00').toLocaleDateString('es-ES', { month: 'long', year: 'numeric' }) : '';
@@ -197,7 +209,7 @@ notify pgrst, 'reload schema';`;
       logoData
     };
   }
-  const emptyData = () => ({ version: 1, company: { name: '', taxId: '', phone: '', email: '', address: '', currency: 'EUR', taxName: 'IGIC', taxRate: 7, owner: '', branding: normalizeBranding({}), quoteCatalog: [] }, leads: [], clients: [], works: [], tasks: [], quotes: [], invoices: [], payments: [], expenses: [], events: [], documents: [], team: [], _meta: { deleted: {} } });
+  const emptyData = () => ({ version: 1, company: { name: '', taxId: '', phone: '', email: '', address: '', currency: 'EUR', taxName: 'IGIC', taxRate: 7, owner: '', branding: normalizeBranding({}), quoteCatalog: [], coelcaCatalog: [] }, leads: [], clients: [], works: [], tasks: [], quotes: [], invoices: [], payments: [], expenses: [], events: [], documents: [], team: [], _meta: { deleted: {} } });
 
   function normalize(input) {
     const source = input && typeof input === 'object' ? input : {};
@@ -205,6 +217,7 @@ notify pgrst, 'reload schema';`;
     Object.assign(out.company, source.company && typeof source.company === 'object' ? source.company : {});
     out.company.branding = normalizeBranding(out.company.branding);
     out.company.quoteCatalog = Array.isArray(out.company.quoteCatalog) ? out.company.quoteCatalog.filter(item => item && item.description).map((item, index) => Object.assign({ id: 'personal-' + (index + 1), group: 'personal', personal: true, category: 'Otros', unit: 'ud', unitPrice: 0, defaultQuantity: 1, source: 'custom', sourceNote: 'Tarifa guardada por la empresa.' }, item)) : [];
+    out.company.coelcaCatalog = Array.isArray(out.company.coelcaCatalog) ? out.company.coelcaCatalog.filter(item => item && item.description && num(item.unitCost) >= 0).map(item => Object.assign({ unit: 'ud', source: 'coelca', costBasis: 'net' }, item)) : [];
     // Migrate the old mainland IVA default to the general Canary Islands IGIC rate.
     if (!source.company || !source.company.taxName) {
       out.company.taxName = 'IGIC';
@@ -472,7 +485,41 @@ notify pgrst, 'reload schema';`;
   }
   function roundMoney(value) { return Math.round((num(value) + Number.EPSILON) * 100) / 100; }
   function quoteLineTotal(item) { return roundMoney(Math.max(0, num(item.quantity)) * Math.max(0, num(item.unitPrice))); }
-  function quoteCostTotal(item) { return roundMoney(Math.max(0, num(item.quantity)) * Math.max(0, num(item.unitCost))); }
+  function coelcaCostRecordForLine(item) {
+    const costs = data.company.coelcaCatalog || [];
+    const reference = String(item && (item.coelcaReference || item.reference) || '').trim();
+    if (reference) {
+      const byReference = costs.find(row => String(row.reference || '').trim().toLowerCase() === reference.toLowerCase());
+      if (byReference) return byReference;
+    }
+    const description = normalizeSearchText(item && item.description || '');
+    const unit = normalizeSearchText(item && item.unit || '');
+    if (!description) return null;
+    return costs.find(row => normalizeSearchText(row.description) === description && normalizeSearchText(row.unit || 'ud') === unit) || null;
+  }
+  function quoteUnitCost(item) {
+    if (!item) return null;
+    if (item.unitCost != null && String(item.unitCost).trim() !== '') return Math.max(0, num(item.unitCost));
+    const supplierRow = coelcaCostRecordForLine(item);
+    if (supplierRow) return Math.max(0, num(supplierRow.unitCost));
+    const description = normalizeSearchText(item.description || '');
+    if (description.includes('oficial de 1 electricista') || description.includes('oficial 1 electricista')) return 25.52;
+    if (description.includes('ayudante electricista')) return 23.54;
+    const catalogItem = SOLAR_QUOTE_CATALOG.find(row =>
+      normalizeSearchText(row.description) === description && normalizeSearchText(row.unit || 'ud') === normalizeSearchText(item.unit || 'ud') && row.unitCost != null
+    );
+    return catalogItem ? Math.max(0, num(catalogItem.unitCost)) : null;
+  }
+  function quoteUnitCostSource(item) {
+    if (item && item.unitCostSource) return String(item.unitCostSource);
+    const supplierRow = coelcaCostRecordForLine(item);
+    if (supplierRow) return 'Coelca · ' + (supplierRow.reference ? 'ref. ' + supplierRow.reference : 'coste importado') + (supplierRow.sourceFile ? ' · ' + supplierRow.sourceFile : '');
+    const description = normalizeSearchText(item && item.description || '');
+    if (description.includes('oficial de 1 electricista') || description.includes('oficial 1 electricista') || description.includes('ayudante electricista')) return 'CYPE · coste directo de referencia';
+    const catalogItem = SOLAR_QUOTE_CATALOG.find(row => normalizeSearchText(row.description) === description && row.unitCost != null);
+    return catalogItem ? (SOLAR_PRICE_SOURCES[catalogItem.source] || {}).label || 'Coste de referencia' : '';
+  }
+  function quoteCostTotal(item) { return roundMoney(Math.max(0, num(item.quantity)) * Math.max(0, quoteUnitCost(item))); }
   function quoteBase(items) { return roundMoney((items || []).reduce((sum, item) => sum + quoteLineTotal(item), 0)); }
   function quoteProfitStats(items, base) {
     const lines = (items || []).filter(item => item && (
@@ -482,16 +529,16 @@ notify pgrst, 'reload schema';`;
       String(item.unitCost == null ? '' : item.unitCost).trim()
     ));
     if (!lines.length) return { state: 'empty', lineCount: 0, missingCosts: 0, incompleteLines: 0, costKnown: 0 };
-    const missingCosts = lines.filter(item => item.unitCost == null || String(item.unitCost).trim() === '').length;
+    const missingCosts = lines.filter(item => item.invalidCost || quoteUnitCost(item) == null).length;
     const incompleteLines = lines.filter(item =>
       !String(item.description || '').trim() ||
       num(item.quantity) <= 0 ||
       !String(item.unit || '').trim() ||
+      item.invalidPrice ||
       item.unitPrice == null ||
       String(item.unitPrice).trim() === ''
     ).length;
-    const costKnown = roundMoney(lines.reduce((sum, item) =>
-      item.unitCost == null || String(item.unitCost).trim() === '' ? sum : sum + quoteCostTotal(item), 0));
+    const costKnown = roundMoney(lines.reduce((sum, item) => item.invalidCost || quoteUnitCost(item) == null ? sum : sum + quoteCostTotal(item), 0));
     if (missingCosts || incompleteLines) return { state: 'incomplete', lineCount: lines.length, missingCosts, incompleteLines, costKnown };
     const grossProfit = roundMoney(num(base) - costKnown);
     return {
@@ -505,7 +552,7 @@ notify pgrst, 'reload schema';`;
     };
   }
   function quoteProfitSummaryMarkup() {
-    return '<section class="quote-profit-summary" data-quote-profit-summary data-state="empty" aria-live="polite"><div class="quote-profit-head"><div><p class="eyebrow">CONTROL INTERNO · PRIVADO</p><h3>Rentabilidad estimada</h3><p data-profit-status>Añade costes internos por partida para calcular el margen.</p></div><span class="quote-profit-badge" data-profit-badge>Sin calcular</span></div><div class="quote-profit-metrics"><div><span data-profit-cost-label>Coste directo total</span><strong data-profit-cost>—</strong></div><div><span data-profit-gross-label>Beneficio bruto estimado</span><strong data-profit-gross>—</strong></div><div><span>Margen sobre la base</span><strong data-profit-margin>—</strong></div></div><p class="quote-profit-note">Base del presupuesto menos los costes directos anotados. No incluye gastos fijos, financiación ni impuestos sobre beneficios. El coste interno nunca se envía al cliente.</p></section>';
+    return '<section class="quote-profit-summary" data-quote-profit-summary data-state="empty" aria-live="polite"><div class="quote-profit-head"><div><p class="eyebrow">CONTROL INTERNO · PRIVADO</p><h3>Rentabilidad estimada</h3><p data-profit-status>Importa la tarifa de Coelca o añade costes de compra para calcular tu beneficio.</p></div><span class="quote-profit-badge" data-profit-badge>Sin calcular</span></div><div class="quote-profit-metrics"><div><span data-profit-cost-label>Costes directos registrados</span><strong data-profit-cost>—</strong></div><div><span data-profit-gross-label>Beneficio bruto estimado</span><strong data-profit-gross>—</strong></div><div><span>Margen sobre la base</span><strong data-profit-margin>—</strong></div></div><p class="quote-profit-note">Base de venta sin IGIC menos los costes de compra y mano de obra registrados. No incluye gastos generales, financiación ni impuestos sobre beneficios. Los costes nunca se envían al cliente.</p></section>';
   }
   function updateQuoteProfitSummary(root, stats) {
     if (!root || !stats) return;
@@ -518,9 +565,9 @@ notify pgrst, 'reload schema';`;
     const gross = $('[data-profit-gross]', root);
     const margin = $('[data-profit-margin]', root);
     if (stats.state === 'empty') {
-      if (status) status.textContent = 'Añade partidas y costes internos para calcular el margen.';
+      if (status) status.textContent = 'Importa los costes de Coelca y añade las partidas de compra necesarias.';
       if (badge) badge.textContent = 'Sin calcular';
-      if (costLabel) costLabel.textContent = 'Coste directo total';
+      if (costLabel) costLabel.textContent = 'Costes directos registrados';
       if (cost) cost.textContent = '—';
       if (grossLabel) grossLabel.textContent = 'Beneficio bruto estimado';
       if (gross) gross.textContent = '—';
@@ -529,11 +576,11 @@ notify pgrst, 'reload schema';`;
     }
     if (stats.state === 'incomplete') {
       const messages = [];
-      if (stats.missingCosts) messages.push('Falta el coste interno en ' + stats.missingCosts + (stats.missingCosts === 1 ? ' partida' : ' partidas'));
+      if (stats.missingCosts) messages.push('Falta el coste de compra en ' + stats.missingCosts + (stats.missingCosts === 1 ? ' partida' : ' partidas'));
       if (stats.incompleteLines) messages.push('Completa la descripción, cantidad y precio de venta en ' + stats.incompleteLines + (stats.incompleteLines === 1 ? ' partida' : ' partidas'));
       if (status) status.textContent = messages.join('. ') + '.';
       if (badge) badge.textContent = 'Costes pendientes';
-      if (costLabel) costLabel.textContent = 'Costes anotados (parcial)';
+      if (costLabel) costLabel.textContent = 'Costes cargados (parcial)';
       if (cost) cost.textContent = stats.costKnown > 0 ? money(stats.costKnown) : '—';
       if (grossLabel) grossLabel.textContent = 'Beneficio bruto estimado';
       if (gross) gross.textContent = '—';
@@ -542,9 +589,9 @@ notify pgrst, 'reload schema';`;
     }
     const negative = stats.grossProfit < 0;
     root.dataset.state = negative ? 'loss' : 'ready';
-    if (status) status.textContent = negative ? 'Los costes directos superan la base del presupuesto.' : 'Cálculo completo con los costes internos anotados.';
+    if (status) status.textContent = negative ? 'Los costes de compra y mano de obra superan la base del presupuesto.' : 'Todos los costes directos de estas partidas están registrados.';
     if (badge) badge.textContent = (negative ? 'Pérdida bruta · ' : 'Margen bruto · ') + solarNumber(stats.marginRate) + '%';
-    if (costLabel) costLabel.textContent = 'Coste directo total';
+    if (costLabel) costLabel.textContent = 'Costes directos registrados';
     if (cost) cost.textContent = money(stats.costKnown);
     if (grossLabel) grossLabel.textContent = negative ? 'Pérdida bruta estimada' : 'Beneficio bruto estimado';
     if (gross) gross.textContent = money(Math.abs(stats.grossProfit));
@@ -1123,10 +1170,135 @@ notify pgrst, 'reload schema';`;
       '<div class="grid-2 grid-even">' + card('Actividad financiera · ' + monthFmt(month), '<div class="list">' + row('Facturado este mes', 'Base imponible más impuestos', '', '<span class="row-amount">' + esc(money(monthBilled)) + '</span>') + row('Gastos este mes', 'Costes registrados', '', '<span class="row-amount">' + esc(money(monthCosts)) + '</span>') + row('Margen estimado', 'Facturación menos gastos del mes', '', '<span class="row-amount">' + esc(money(monthBilled - monthCosts)) + '</span>') + '</div>', 'Importes según los registros disponibles') + card('Datos de la empresa', '<div class="list">' + row('Clientes', String(data.clients.length), '', '') + row('Obras activas', String(data.works.filter(w => w.status === 'En curso').length), '', '') + row('Tareas pendientes', String(data.tasks.filter(t => isTaskOpen(t)).length), '', '') + row('Presupuestos enviados', String(data.quotes.filter(q => q.status === 'Enviada').length), '', '') + '</div>', 'Actividad registrada') + '</div><div style="margin-top:14px">' + card('Rentabilidad por obra', workRows, 'Presupuesto frente a gastos asociados') + '</div>';
   }
 
+  function coelcaCsvCells(line, delimiter) {
+    const cells = [];
+    let value = '';
+    let quoted = false;
+    for (let index = 0; index < line.length; index++) {
+      const character = line[index];
+      if (character === '"' && quoted && line[index + 1] === '"') { value += '"'; index++; }
+      else if (character === '"') quoted = !quoted;
+      else if (character === delimiter && !quoted) { cells.push(value.trim()); value = ''; }
+      else value += character;
+    }
+    cells.push(value.trim());
+    return cells;
+  }
+  function coelcaCsvNumber(value) {
+    let textValue = String(value == null ? '' : value).trim().replace(/[€\s]/g, '').replace(/[^\d,.-]/g, '');
+    if (!textValue) return NaN;
+    if (textValue.includes(',') && textValue.includes('.')) textValue = textValue.lastIndexOf(',') > textValue.lastIndexOf('.') ? textValue.replace(/\./g, '').replace(',', '.') : textValue.replace(/,/g, '');
+    else if (textValue.includes(',')) textValue = textValue.replace(',', '.');
+    else if (/\.\d{3}$/.test(textValue)) textValue = textValue.replace(/\./g, '');
+    const parsed = Number(textValue);
+    return Number.isFinite(parsed) ? parsed : NaN;
+  }
+  function parseCoelcaCostCsv(textValue, includesTax) {
+    const lines = String(textValue || '').replace(/^\uFEFF/, '').split(/\r?\n/).filter(line => line.trim());
+    if (lines.length < 2) throw new Error('El archivo no contiene una cabecera y filas de productos.');
+    const sample = lines.slice(0, 15);
+    const delimiters = [';', '\t', ','];
+    const delimiter = delimiters.sort((a, b) => sample.reduce((score, line) => score + line.split(a).length - 1, 0) - sample.reduce((score, line) => score + line.split(b).length - 1, 0)).pop();
+    const rows = lines.map(line => coelcaCsvCells(line, delimiter));
+    const headerKey = value => normalizeSearchText(value).replace(/[\s_-]+/g, '');
+    let headerIndex = -1;
+    let headers = [];
+    for (let index = 0; index < Math.min(rows.length, 30); index++) {
+      const candidate = rows[index].map(headerKey);
+      const hasDescription = candidate.some(value => /descripcion|producto|articulo|nombre/.test(value));
+      const hasCost = candidate.some(value => /coste|precio|importe|pvp|price/.test(value));
+      if (hasDescription && hasCost) { headerIndex = index; headers = candidate; break; }
+    }
+    if (headerIndex < 0) throw new Error('No encuentro las columnas de descripción y precio. Descarga la plantilla y copia ahí la tarifa de Coelca.');
+    const findColumn = patterns => headers.findIndex(value => patterns.some(pattern => pattern.test(value)));
+    const referenceIndex = findColumn([/^referencia$/, /^referenciaarticulo$/, /^referenciaproducto$/, /^ref$/, /^codigo$/, /^codigoproducto$/, /^sku$/, /^articuloid$/, /^model$/]);
+    const descriptionIndex = findColumn([/descripcion/, /producto/, /articulo/, /nombre/]);
+    const unitIndex = findColumn([/^unidad$/, /^ud$/, /^unit$/, /unidadventa/]);
+    const unitCostIndex = findColumn([/costeunitario/, /preciounitario/, /costeneto/, /precioneto/, /preciobase/, /preciosinigic/, /precioantesimpuesto/, /precio(?:de)?compra/, /coste(?:de)?compra/, /^coste$/, /^precio$/]);
+    const lineAmountIndex = findColumn([/importetotal/, /^importe$/, /costetotal/, /preciototal/, /subtotal/]);
+    const quantityIndex = findColumn([/^cantidad$/, /^cant\.?$/, /^qty$/, /^unidades$/, /^uds$/]);
+    if (descriptionIndex < 0 || (unitCostIndex < 0 && lineAmountIndex < 0)) throw new Error('La tarifa necesita descripción y coste/precio unitario.');
+    const parsed = [];
+    for (let index = headerIndex + 1; index < rows.length; index++) {
+      const row = rows[index].slice();
+      const priceColumn = unitCostIndex >= 0 ? unitCostIndex : lineAmountIndex;
+      while (row.length > headers.length && priceColumn >= 0 && priceColumn < row.length - 1 && /^-?[\d.]+$/.test(row[priceColumn]) && /^\d{1,2}$/.test(row[priceColumn + 1])) {
+        row.splice(priceColumn, 2, row[priceColumn] + ',' + row[priceColumn + 1]);
+      }
+      const description = row[descriptionIndex] || '';
+      const reference = referenceIndex >= 0 ? String(row[referenceIndex] || '').trim() : '';
+      const quantity = quantityIndex >= 0 ? coelcaCsvNumber(row[quantityIndex]) : NaN;
+      let unitCost = unitCostIndex >= 0 ? coelcaCsvNumber(row[unitCostIndex]) : NaN;
+      if (!Number.isFinite(unitCost) && lineAmountIndex >= 0) {
+        const amount = coelcaCsvNumber(row[lineAmountIndex]);
+        unitCost = Number.isFinite(amount) && quantity > 0 ? amount / quantity : amount;
+      }
+      if (!description || !Number.isFinite(unitCost) || unitCost < 0) continue;
+      if (includesTax) unitCost /= 1 + Math.max(0, num(data.company.taxRate)) / 100;
+      parsed.push({ reference, description: String(description).trim(), unit: unitIndex >= 0 ? String(row[unitIndex] || 'ud').trim() || 'ud' : 'ud', unitCost: roundMoney(unitCost) });
+    }
+    if (!parsed.length) throw new Error('No encontré productos con coste válido en el archivo.');
+    return parsed;
+  }
+  async function importCoelcaCostFile(file, includesTax) {
+    if (!file) return;
+    try {
+      const parsed = parseCoelcaCostCsv(await file.text(), includesTax);
+      const importedAt = nowIso();
+      const filename = String(file.name || 'tarifa Coelca').slice(0, 100);
+      const updated = (data.company.coelcaCatalog || []).slice();
+      let added = 0;
+      parsed.forEach(entry => {
+        const existingIndex = updated.findIndex(item => entry.reference && item.reference
+          ? String(item.reference).toLowerCase() === entry.reference.toLowerCase()
+          : normalizeSearchText(item.description) === normalizeSearchText(entry.description) && normalizeSearchText(item.unit || 'ud') === normalizeSearchText(entry.unit));
+        const previous = existingIndex >= 0 ? updated[existingIndex] : null;
+        const record = Object.assign({}, previous || {}, entry, {
+          id: previous && previous.id || 'coelca-' + uid(),
+          source: 'coelca',
+          sourceFile: filename,
+          costBasis: 'net',
+          importedAt,
+          costReferenceUrl: SOLAR_PRICE_SOURCES.coelca.url
+        });
+        if (existingIndex >= 0) updated[existingIndex] = record;
+        else { updated.push(record); added++; }
+      });
+      if (!commitChange(() => {
+        data.company.coelcaCatalog = updated;
+        data._meta.companyUpdated = Date.now();
+      })) return;
+      render();
+      toast(parsed.length + ' costes Coelca importados (' + added + ' nuevos). El coste importado no cambia el precio de venta.', 'good');
+    } catch (error) {
+      toast(error && error.message || 'No se pudo leer la tarifa de Coelca.', 'bad');
+    }
+  }
+  function downloadCoelcaCostTemplate() {
+    const contents = '\uFEFFreferencia;descripcion;unidad;coste_unitario_sin_igic\nREF-COELCA;Ejemplo: sustituir por un artículo real;ud;\n';
+    const url = URL.createObjectURL(new Blob([contents], { type: 'text/csv;charset=utf-8' }));
+    const anchor = document.createElement('a');
+    anchor.href = url;
+    anchor.download = 'plantilla-costes-coelca.csv';
+    anchor.click();
+    setTimeout(() => URL.revokeObjectURL(url), 1000);
+  }
+  function renderCoelcaCostSettings(nav) {
+    const items = (data.company.coelcaCatalog || []).slice().sort((a, b) => normalizeSearchText(a.description).localeCompare(normalizeSearchText(b.description), 'es'));
+    const latest = items.reduce((result, item) => !result || String(item.importedAt || '') > String(result) ? item.importedAt : result, '');
+    const rows = items.length ? '<div class="list">' + items.map(item => '<div class="row-item"><div class="row-main"><div class="row-title">' + esc(item.description) + '</div><div class="row-sub">' + esc([item.reference ? 'Ref. ' + item.reference : '', item.unit || 'ud', 'Coste de compra sin IGIC', item.sourceFile || 'Tarifa Coelca'].filter(Boolean).join(' · ')) + '</div></div><div class="row-end"><strong class="row-amount">' + esc(money(item.unitCost)) + ' / ' + esc(item.unit || 'ud') + '</strong></div></div>').join('') + '</div>' : '<div class="empty-state"><strong>Aún no hay precios de Coelca</strong><p>Importa una tarifa o factura CSV una vez. Las partidas aparecerán después dentro de tus presupuestos con el coste de compra ya cargado.</p></div>';
+    const updatedLabel = latest ? 'Última importación: ' + dateFmt(String(latest).slice(0, 10)) : 'Sin tarifas importadas';
+    return header('PROVEEDOR', 'Ajustes', 'Costes de compra de Coelca para calcular tu beneficio real.') + nav +
+      '<section class="card coelca-cost-card"><div class="card-head"><div><h2>Tarifa de compra · Coelca</h2><p>El coste se guarda aparte del precio que cobras al cliente. El beneficio se calcula como venta menos coste; los precios importados nunca se muestran al cliente.</p></div><span class="badge">' + items.length + ' productos</span></div>' +
+      '<div class="coelca-import-actions"><label class="field"><span>¿Los precios del archivo incluyen IGIC?</span><select data-coelca-tax-mode><option value="net" selected>No, vienen sin IGIC</option><option value="gross">Sí, incluyen IGIC (' + esc(solarNumber(data.company.taxRate)) + '%)</option></select></label><div class="head-actions"><input id="coelca-cost-file" type="file" accept=".csv,.txt,text/csv,text/plain" hidden><button type="button" class="btn btn-primary" data-action="coelca-import-file">Importar tarifa CSV de Coelca</button><button type="button" class="btn" data-action="coelca-cost-template">Descargar plantilla</button></div></div>' +
+      '<p class="modal-note coelca-cost-help">Formato recomendado: <strong>referencia;descripcion;unidad;coste_unitario_sin_igic</strong>. También reconoce columnas habituales de código, artículo, cantidad, precio unitario e importe. Elige si el archivo incluye IGIC. <a href="' + esc(SOLAR_PRICE_SOURCES.coelca.url) + '" target="_blank" rel="noopener">Abrir catálogo público de Coelca ↗</a>. ' + esc(updatedLabel) + '</p>' + rows +
+      (items.length ? '<div class="head-actions"><button type="button" class="btn btn-danger btn-sm" data-action="coelca-clear-costs">Vaciar costes importados</button></div>' : '') + '</section>';
+  }
   function renderSettings() {
-    const tabs = [['empresa', 'Empresa'], ['marca', 'Marca'], ['equipo', 'Equipo'], ['datos', 'Datos y nube']];
+    const tabs = [['empresa', 'Empresa'], ['marca', 'Marca'], ['costes', 'Costes Coelca'], ['equipo', 'Equipo'], ['datos', 'Datos y nube']];
     const nav = '<div class="settings-tabs">' + tabs.map(x => '<button class="' + (settingsTab === x[0] ? 'active' : '') + '" data-action="settings-tab" data-tab="' + x[0] + '">' + x[1] + '</button>').join('') + '</div>';
     if (settingsTab === 'marca') return renderBrandSettings(nav);
+    if (settingsTab === 'costes') return renderCoelcaCostSettings(nav);
     if (settingsTab === 'empresa') {
       return header('PERSONALIZACIÓN', 'Ajustes', 'Configura los datos de tu negocio y cómo quieres trabajar.') + nav +
         '<section class="card"><div class="card-head"><div><h2>Datos de empresa</h2><p>Se usarán en la aplicación y los informes.</p></div></div><form id="company-form"><div class="fields">' +
@@ -1974,7 +2146,12 @@ notify pgrst, 'reload schema';`;
   function quoteLineMarkup(item) {
     const category = item.category || 'Mano de obra';
     const unit = item.unit == null ? quoteDefaultUnit(category) : String(item.unit);
-    const unitCost = item.unitCost == null ? '' : item.unitCost;
+    const resolvedUnitCost = quoteUnitCost(item);
+    const unitCost = resolvedUnitCost == null ? '' : resolvedUnitCost;
+    const lineCostTotal = resolvedUnitCost == null ? null : roundMoney(Math.max(0, num(item.quantity)) * resolvedUnitCost);
+    const lineProfit = lineCostTotal == null || item.unitPrice == null || String(item.unitPrice).trim() === '' ? null : roundMoney(quoteLineTotal(item) - lineCostTotal);
+    const unitCostSource = quoteUnitCostSource(item);
+    const coelcaReference = item.coelcaReference || item.reference || '';
     const priceReference = item.priceReference || '';
     const priceReferenceUrl = item.priceReferenceUrl || '';
     const priceRange = item.priceRange || '';
@@ -1987,13 +2164,17 @@ notify pgrst, 'reload schema';`;
       '<div class="field quote-description"><label for="' + lineId + '-description">Descripción</label><input id="' + lineId + '-description" data-quote-field="description" type="text" value="' + esc(item.description || '') + '" placeholder="Ej.: Instalación, desplazamiento a obra, cemento"></div>' +
       '<div class="field"><label for="' + lineId + '-quantity">Cantidad</label><input id="' + lineId + '-quantity" data-quote-field="quantity" type="number" min="0.01" step="0.01" value="' + esc(item.quantity == null ? '' : item.quantity) + '" placeholder="0"></div>' +
       '<div class="field"><label for="' + lineId + '-unit">Unidad</label><input id="' + lineId + '-unit" data-quote-field="unit" type="text" data-auto-unit="' + autoUnit + '" value="' + esc(unit) + '" placeholder="horas, km, ud"></div>' +
-      '<div class="field"><label for="' + lineId + '-price">Precio de venta / unidad (€)</label><input id="' + lineId + '-price" data-quote-field="unitPrice" type="number" min="0" step="0.01" value="' + esc(item.unitPrice == null ? '' : item.unitPrice) + '" placeholder="0,00"></div>' +
-      '<div class="field quote-line-cost-field"><label for="' + lineId + '-cost">Coste interno / unidad (€)</label><input id="' + lineId + '-cost" data-quote-field="unitCost" type="number" min="0" step="0.01" value="' + esc(unitCost) + '" placeholder="Coste real"><span class="hint">Solo para tu margen; no se comparte.</span></div>' +
-      '<div class="quote-line-total-wrap"><span>Importe de la partida</span><strong data-quote-line-total>0,00 €</strong></div>' +
-      '</div><div class="quote-line-actions"><span class="muted small">Cantidad × precio cobrado. Añade tu coste para calcular rentabilidad.</span>' + (priceReference ? '<small class="quote-line-reference">Referencia ' + esc(priceRange ? priceRange + ' · ' : '') + (priceReferenceUrl ? '<a href="' + esc(safeHref(priceReferenceUrl)) + '" target="_blank" rel="noopener">' + esc(priceReference) + ' ↗</a>' : esc(priceReference)) + (priceReferenceNote ? ' · ' + esc(priceReferenceNote) : '') + '</small>' : '') + '<button type="button" class="tiny-btn" data-action="save-quote-line-to-catalog">Guardar en mi catálogo</button><button type="button" class="tiny-btn danger" data-action="remove-quote-line" aria-label="Quitar esta partida">Quitar partida</button></div><input type="hidden" data-quote-field="priceReference" value="' + esc(priceReference) + '"><input type="hidden" data-quote-field="priceReferenceUrl" value="' + esc(priceReferenceUrl) + '"><input type="hidden" data-quote-field="priceRange" value="' + esc(priceRange) + '"><input type="hidden" data-quote-field="priceReferenceNote" value="' + esc(priceReferenceNote) + '"></article>';
+      '<div class="field"><label for="' + lineId + '-price">Precio de venta / unidad (€)</label><input id="' + lineId + '-price" data-quote-field="unitPrice" type="text" inputmode="decimal" autocomplete="off" value="' + esc(item.unitPrice == null ? '' : item.unitPrice) + '" placeholder="0,00"></div>' +
+      '<div class="field quote-line-cost-field"><label for="' + lineId + '-cost">Coste de compra / unidad (€)</label><input id="' + lineId + '-cost" data-quote-field="unitCost" type="text" inputmode="decimal" autocomplete="off" value="' + esc(unitCost) + '" placeholder="Coste Coelca"><span class="hint">' + esc(unitCostSource ? 'Fuente: ' + unitCostSource + '. Solo para tu margen; no se comparte.' : 'Coste Coelca o de otro proveedor; solo interno.') + '</span></div>' +
+      '<div class="quote-line-total-wrap"><span>Venta de la partida</span><strong data-quote-line-total>0,00 €</strong><span>Coste total</span><strong data-quote-line-cost>' + (lineCostTotal == null ? 'Pendiente' : esc(money(lineCostTotal))) + '</strong><span>Beneficio bruto</span><strong data-quote-line-profit>' + (lineProfit == null ? 'Pendiente' : esc(money(lineProfit))) + '</strong></div>' +
+      '</div><div class="quote-line-actions"><span class="muted small">Cantidad × precio de venta. El coste de Coelca y el beneficio son solo internos.</span>' + (priceReference ? '<small class="quote-line-reference">Referencia ' + esc(priceRange ? priceRange + ' · ' : '') + (priceReferenceUrl ? '<a href="' + esc(safeHref(priceReferenceUrl)) + '" target="_blank" rel="noopener">' + esc(priceReference) + ' ↗</a>' : esc(priceReference)) + (priceReferenceNote ? ' · ' + esc(priceReferenceNote) : '') + '</small>' : '') + '<button type="button" class="tiny-btn" data-action="save-quote-line-to-catalog">Guardar en mi catálogo</button><button type="button" class="tiny-btn danger" data-action="remove-quote-line" aria-label="Quitar esta partida">Quitar partida</button></div><input type="hidden" data-quote-field="unitCostSource" value="' + esc(unitCostSource) + '"><input type="hidden" data-quote-field="coelcaReference" value="' + esc(coelcaReference) + '"><input type="hidden" data-quote-field="priceReference" value="' + esc(priceReference) + '"><input type="hidden" data-quote-field="priceReferenceUrl" value="' + esc(priceReferenceUrl) + '"><input type="hidden" data-quote-field="priceRange" value="' + esc(priceRange) + '"><input type="hidden" data-quote-field="priceReferenceNote" value="' + esc(priceReferenceNote) + '"></article>';
   }
   function quoteItemsForForm(item) {
-    if (Array.isArray(item.items) && item.items.length) return clone(item.items);
+    if (Array.isArray(item.items) && item.items.length) return clone(item.items).map(line => {
+      if (line.unitCost != null && String(line.unitCost).trim() !== '') return line;
+      const cost = quoteUnitCost(line);
+      return cost == null ? line : Object.assign({}, line, { unitCost: cost, unitCostSource: quoteUnitCostSource(line) });
+    });
     if (num(item.amount) > 0) return [{ category: 'Otros', description: item.title || 'Importe anterior sin desglose', quantity: 1, unit: 'servicio', unitPrice: num(item.amount) }];
     return [{ category: 'Mano de obra', description: '', quantity: '', unit: 'horas', unitPrice: '' }];
   }
@@ -2009,12 +2190,16 @@ notify pgrst, 'reload schema';`;
   function quoteCatalogMarkup(workId) {
     const initialPower = quotePowerForWork(workId) || 5;
     const personalCount = (data.company.quoteCatalog || []).length;
-    return '<section class="quote-catalog" aria-label="Catálogo fotovoltaico de partidas"><div class="quote-catalog-head"><div><p class="eyebrow">CATÁLOGO FOTOVOLTAICO</p><strong>Partidas preparadas para tus presupuestos</strong><p>Selecciona productos sueltos o genera un desglose inicial desde los kWp de PVGIS. Tus partidas guardadas quedan en tu cuenta.</p></div><span class="quote-catalog-count">' + (SOLAR_QUOTE_CATALOG.length + personalCount) + ' partidas</span></div>' +
+    const coelcaCount = (data.company.coelcaCatalog || []).length;
+    const allCount = SOLAR_QUOTE_CATALOG.length + personalCount + coelcaCount;
+    return '<section class="quote-catalog" aria-label="Catálogo fotovoltaico de partidas"><div class="quote-catalog-head"><div><p class="eyebrow">CATÁLOGO FOTOVOLTAICO</p><strong>Partidas preparadas para tus presupuestos</strong><p>Selecciona productos sueltos o genera un desglose inicial desde los kWp de PVGIS. Los artículos importados de Coelca ya incluyen tu coste de compra.</p></div><span class="quote-catalog-count">' + allCount + ' partidas</span></div>' +
       '<div class="solar-bundle-tools"><div><p class="eyebrow">GENERADOR DE DESGLOSE</p><strong>Prepara un presupuesto solar en un clic</strong><p>Usa la potencia del estudio PVGIS asociado a la obra. Si no hay estudio, parte de 5 kWp. Las cantidades se pueden cambiar.</p></div><div class="solar-bundle-fields"><div class="field"><label>Potencia FV (kWp)</label><input type="number" min="1" max="20" step="0.1" value="' + esc(initialPower) + '" data-solar-bundle-power></div><div class="field"><label>Inversor</label><select data-solar-bundle-inverter><option value="hybrid" selected>Híbrido (preparado para batería)</option><option value="string">String (sin batería)</option></select></div><div class="field"><label>Cubierta</label><select data-solar-bundle-roof><option value="tile" selected>Teja</option><option value="flat">Plana lastrada</option><option value="sheet">Chapa / sándwich</option><option value="slate">Pizarra / teja especial</option><option value="carport">Pérgola / marquesina</option></select></div><div class="field"><label>Batería</label><select data-solar-bundle-battery><option value="0" selected>Sin batería</option><option value="5">5 kWh</option><option value="10">10 kWh</option><option value="15">15 kWh</option></select></div></div><button type="button" class="btn btn-primary btn-sm" data-action="add-solar-quote-bundle">＋ Añadir desglose FV sugerido</button></div>' +
-      '<div class="quote-catalog-tools"><div class="field"><label for="quote-catalog-search">Buscar partidas</label><input id="quote-catalog-search" type="search" data-catalog-search placeholder="Panel, inversor, batería, cable, hora, IGIC…" autocomplete="off"></div><div class="field"><label for="quote-catalog-group">Ver por grupo</label><select id="quote-catalog-group" data-catalog-group><option value="todas" selected>Todo el catálogo (' + (SOLAR_QUOTE_CATALOG.length + personalCount) + ')</option><option value="frecuentes">Más utilizadas</option><option value="kits">Kits llave en mano</option><option value="modulos">Paneles</option><option value="inversores">Inversores y optimizadores</option><option value="baterias">Baterías y almacenamiento</option><option value="estructuras">Estructuras y cubiertas</option><option value="electricos">Cableado, cuadros y protecciones</option><option value="equipos">Cargadores y gestión energética</option><option value="montaje">Mano de obra y medios auxiliares</option><option value="gestion">Desplazamientos y trámites</option><option value="mantenimiento">Mantenimiento y postventa</option><option value="personal">Mis partidas guardadas (' + personalCount + ')</option></select></div></div><div class="quote-catalog-status"><strong data-catalog-result-count role="status" aria-live="polite"></strong><button type="button" class="btn btn-sm btn-primary" data-action="show-all-quote-catalog">Mostrar todas (' + (SOLAR_QUOTE_CATALOG.length + personalCount) + ')</button></div><p class="quote-catalog-warning" data-catalog-warning hidden>Este pack llave en mano incluye el suministro y los trabajos habituales. No lo combines con esas mismas partidas desglosadas.</p><div class="quote-catalog-results" data-catalog-results></div><div class="quote-catalog-footer">Referencias: <a href="' + esc(SOLAR_PRICE_SOURCES.canary.url) + '" target="_blank" rel="noopener">precios residenciales publicados en Canarias</a>, <a href="' + esc(SOLAR_PRICE_SOURCES.market.url) + '" target="_blank" rel="noopener">desglose fotovoltaico 2026</a>, <a href="' + esc(SOLAR_PRICE_SOURCES.preoc.url) + '" target="_blank" rel="noopener">PREOC 2026</a> y <a href="' + esc(SOLAR_PRICE_SOURCES.cype.url) + '" target="_blank" rel="noopener">CYPE</a>. Precios editables de referencia; comprueba stock, envío interinsular, alcance e IGIC antes de enviar. Las cantidades sugeridas no sustituyen el replanteo ni el cálculo eléctrico.</div></section>';
+      '<div class="quote-catalog-tools"><div class="field"><label for="quote-catalog-search">Buscar partidas</label><input id="quote-catalog-search" type="search" data-catalog-search placeholder="Panel, inversor, batería, cable, hora, IGIC…" autocomplete="off"></div><div class="field"><label for="quote-catalog-group">Ver por grupo</label><select id="quote-catalog-group" data-catalog-group><option value="todas" selected>Todo el catálogo (' + allCount + ')</option><option value="frecuentes">Más utilizadas</option><option value="kits">Kits llave en mano</option><option value="modulos">Paneles</option><option value="inversores">Inversores y optimizadores</option><option value="baterias">Baterías y almacenamiento</option><option value="estructuras">Estructuras y cubiertas</option><option value="electricos">Cableado, cuadros y protecciones</option><option value="equipos">Cargadores y gestión energética</option><option value="montaje">Mano de obra y medios auxiliares</option><option value="gestion">Desplazamientos y trámites</option><option value="mantenimiento">Mantenimiento y postventa</option><option value="coelca">Costes importados de Coelca (' + coelcaCount + ')</option><option value="personal">Mis partidas guardadas (' + personalCount + ')</option></select></div></div><div class="quote-catalog-status"><strong data-catalog-result-count role="status" aria-live="polite"></strong><button type="button" class="btn btn-sm btn-primary" data-action="show-all-quote-catalog">Mostrar todas (' + allCount + ')</button></div><p class="quote-catalog-warning" data-catalog-warning hidden>Este pack llave en mano incluye el suministro y los trabajos habituales. No lo combines con esas mismas partidas desglosadas.</p><div class="quote-catalog-results" data-catalog-results></div><div class="quote-catalog-footer">Los costes de compra Coelca se importan desde tu tarifa o factura, se guardan aparte del precio de venta y se reutilizan aquí. Referencias de venta: <a href="' + esc(SOLAR_PRICE_SOURCES.canary.url) + '" target="_blank" rel="noopener">precios publicados en Canarias</a>, <a href="' + esc(SOLAR_PRICE_SOURCES.market.url) + '" target="_blank" rel="noopener">desglose FV</a>, <a href="' + esc(SOLAR_PRICE_SOURCES.preoc.url) + '" target="_blank" rel="noopener">PREOC</a> y <a href="' + esc(SOLAR_PRICE_SOURCES.cype.url) + '" target="_blank" rel="noopener">CYPE</a>. Revisa stock, transporte, IGIC y alcance antes de enviar.</div></section>';
   }
   function quoteCatalogItems() {
-    return SOLAR_QUOTE_CATALOG.concat((data.company.quoteCatalog || []).map(item => Object.assign({}, item, { group: 'personal', personal: true, source: 'custom' })));
+    const personal = (data.company.quoteCatalog || []).map(item => Object.assign({}, item, { group: 'personal', personal: true, source: 'custom' }));
+    const coelca = (data.company.coelcaCatalog || []).map(item => Object.assign({}, item, { group: 'coelca', category: item.category || 'Material', personal: false, source: 'coelca', unitPrice: 0, costOnly: true, sourceNote: 'Coste de compra importado de Coelca. Indica el precio de venta al cliente.' }));
+    return SOLAR_QUOTE_CATALOG.concat(personal, coelca);
   }
   function customCatalogPriceFor(item) {
     if (item && item.personal) return item;
@@ -2022,6 +2207,7 @@ notify pgrst, 'reload schema';`;
   }
   function catalogEffectivePrice(item) {
     const saved = customCatalogPriceFor(item);
+    if (!saved && item && item.costOnly) return quoteUnitCost(item) == null ? num(item.unitPrice) : quoteUnitCost(item);
     return saved ? num(saved.unitPrice) : num(item.unitPrice);
   }
   function quoteCatalogCardMarkup(item) {
@@ -2029,7 +2215,7 @@ notify pgrst, 'reload schema';`;
     const savedPrice = customCatalogPriceFor(item);
     const costOnly = !!(item.costOnly && !savedPrice);
     const sourceLabel = savedPrice ? 'Tu tarifa guardada aplicada' : source.label || 'Precio de referencia';
-    return '<article class="quote-catalog-card"><div class="quote-catalog-card-copy"><span class="quote-catalog-type">' + esc(item.category) + '</span><strong>' + esc(item.description) + '</strong><small>' + esc(item.range || '') + '</small></div><div class="quote-catalog-card-bottom"><div><strong>' + esc(money(catalogEffectivePrice(item))) + '</strong><span>' + (costOnly ? 'coste directo / ' + esc(item.unit) : 'por ' + esc(item.unit)) + '</span></div><button type="button" class="btn btn-sm btn-primary" data-action="add-catalog-quote-line" data-catalog-id="' + esc(item.id) + '">' + (costOnly ? 'Añadir coste' : 'Añadir') + '</button></div><small class="quote-catalog-source">' + (savedPrice ? esc(sourceLabel) + (source.url ? ' · referencia: <a href="' + esc(source.url) + '" target="_blank" rel="noopener">' + esc(source.label || 'precio de referencia') + ' ↗</a>' : '') : source.url ? '<a href="' + esc(source.url) + '" target="_blank" rel="noopener">' + esc(source.label) + ' ↗</a>' : esc(sourceLabel)) + (item.sourceNote ? ' · ' + esc(item.sourceNote) : '') + '</small>' + (item.personal ? '<button type="button" class="tiny-btn danger" data-action="remove-saved-quote-catalog-item" data-catalog-id="' + esc(item.id) + '">Quitar de mi catálogo</button>' : '') + '</article>';
+    return '<article class="quote-catalog-card"><div class="quote-catalog-card-copy"><span class="quote-catalog-type">' + esc(item.category) + '</span><strong>' + esc(item.description) + '</strong><small>' + esc(item.range || (item.reference ? 'Ref. Coelca ' + item.reference : '')) + '</small></div><div class="quote-catalog-card-bottom"><div><strong>' + esc(money(catalogEffectivePrice(item))) + '</strong><span>' + (costOnly ? (item.source === 'coelca' ? 'coste Coelca / ' : 'coste directo / ') + esc(item.unit) : 'por ' + esc(item.unit)) + '</span></div><button type="button" class="btn btn-sm btn-primary" data-action="add-catalog-quote-line" data-catalog-id="' + esc(item.id) + '">' + (costOnly ? 'Añadir coste' : 'Añadir') + '</button></div><small class="quote-catalog-source">' + (savedPrice ? esc(sourceLabel) + (source.url ? ' · referencia: <a href="' + esc(source.url) + '" target="_blank" rel="noopener">' + esc(source.label || 'precio de referencia') + ' ↗</a>' : '') : source.url ? '<a href="' + esc(source.url) + '" target="_blank" rel="noopener">' + esc(source.label) + ' ↗</a>' : esc(sourceLabel)) + (item.sourceNote ? ' · ' + esc(item.sourceNote) : '') + '</small>' + (item.personal ? '<button type="button" class="tiny-btn danger" data-action="remove-saved-quote-catalog-item" data-catalog-id="' + esc(item.id) + '">Quitar de mi catálogo</button>' : '') + '</article>';
   }
   function renderQuoteCatalog(form) {
     const results = $('[data-catalog-results]', form);
@@ -2040,7 +2226,7 @@ notify pgrst, 'reload schema';`;
     const featuredIds = ['kit-3kwp', 'kit-5kwp', 'kit-5kwp-battery', 'panel-tier1', 'inverter-hybrid', 'battery-5kwh', 'structure-tile', 'protection-kit-1ph', 'cable-set-kwp', 'smart-meter', 'wiring-protection', 'mounting-labor', 'legalization', 'travel-visit'];
     const items = allItems.filter(item => {
       const inGroup = group === 'todas' || item.group === group || (group === 'frecuentes' && (item.featured || featuredIds.includes(item.id))) || (group === 'personal' && item.personal);
-      const haystack = normalizeSearchText([item.description, item.category, item.unit, item.range, item.sourceNote].join(' '));
+      const haystack = normalizeSearchText([item.description, item.category, item.unit, item.range, item.sourceNote, item.reference].join(' '));
       return inGroup && (!search || haystack.includes(search));
     });
     results.innerHTML = items.length ? items.map(quoteCatalogCardMarkup).join('') : '<p class="quote-catalog-empty">No hay partidas en este grupo todavía. Añade una partida a mano y pulsa «Guardar en mi catálogo» para reutilizarla en próximos presupuestos.</p>';
@@ -2060,8 +2246,11 @@ notify pgrst, 'reload schema';`;
     const source = SOLAR_PRICE_SOURCES[item.source] || {};
     const saved = customCatalogPriceFor(item);
     const costOnly = !!(item.costOnly && !saved);
+    const currentSupplierCost = item.source === 'coelca' ? quoteUnitCost(item) : null;
     const suggestedQuantity = item.quantityRule ? suggestedCatalogQuantity(item, form) : saved && saved.defaultQuantity || item.defaultQuantity || 1;
-    return { category: item.category || 'Otros', description: item.description, quantity: quantity == null ? suggestedQuantity : quantity, unit: item.unit || 'ud', unitPrice: costOnly ? '' : catalogEffectivePrice(item), unitCost: saved && saved.unitCost != null ? saved.unitCost : item.unitCost != null ? num(item.unitCost) : item.costOnly ? num(item.unitPrice) : '', priceReference: saved ? 'Mi tarifa guardada' : source.label || '', priceReferenceUrl: source.url || '', priceRange: saved ? '' : item.range || '', priceReferenceNote: costOnly ? 'El importe CYPE se guarda como coste interno. Escribe aparte la tarifa que cobrarás al cliente.' : saved ? 'Se ha aplicado tu tarifa guardada; el coste interno se conserva para calcular el margen.' : item.sourceNote || '' };
+    const unitCost = currentSupplierCost != null ? currentSupplierCost : saved && saved.unitCost != null ? saved.unitCost : quoteUnitCost(item);
+    const unitCostSource = currentSupplierCost != null ? quoteUnitCostSource(item) : saved && saved.unitCostSource || quoteUnitCostSource(item) || (costOnly ? 'Coelca · tarifa importada' : '');
+    return { category: item.category || 'Otros', description: item.description, quantity: quantity == null ? suggestedQuantity : quantity, unit: item.unit || 'ud', unitPrice: costOnly ? '' : catalogEffectivePrice(item), unitCost, unitCostSource, coelcaReference: item.reference || '', priceReference: saved ? 'Mi tarifa guardada' : source.label || '', priceReferenceUrl: source.url || '', priceRange: saved ? '' : item.range || '', priceReferenceNote: costOnly ? 'Coste de compra Coelca importado. Indica el precio de venta que cobrarás al cliente.' : saved ? 'Se ha aplicado tu precio de venta guardado; el coste se conserva para calcular el margen.' : item.sourceNote || '' };
   }
   function addCatalogQuoteLine(form, catalogId) {
     if (!form) return;
@@ -2115,7 +2304,7 @@ notify pgrst, 'reload schema';`;
     if (!description || !unit || !priceRaw || num(priceRaw) < 0) return toast('Completa descripción, unidad y precio antes de guardar esta partida.', 'bad');
     const saved = (data.company.quoteCatalog || []).slice();
     const existing = saved.find(item => normalizeSearchText(item.description) === normalizeSearchText(description) && normalizeSearchText(item.unit) === normalizeSearchText(unit));
-    const catalogItem = { id: existing && existing.id || 'personal-' + uid(), group: 'personal', personal: true, category, description, unit, unitPrice: num(priceRaw), unitCost: costRaw === '' ? null : num(costRaw), defaultQuantity: quantity, source: 'custom', sourceNote: 'Tarifa guardada por la empresa. Puedes editar el precio y el coste interno en cada presupuesto.' };
+    const catalogItem = { id: existing && existing.id || 'personal-' + uid(), group: 'personal', personal: true, category, description, unit, unitPrice: num(priceRaw), unitCost: costRaw === '' ? null : num(costRaw), unitCostSource: ($('[data-quote-field="unitCostSource"]', row) || {}).value || '', defaultQuantity: quantity, source: 'custom', sourceNote: 'Tarifa guardada por la empresa. Puedes editar el precio de venta y el coste de compra en cada presupuesto.' };
     if (!commitChange(() => {
       const current = data.company.quoteCatalog || [];
       const index = current.findIndex(item => item.id === catalogItem.id);
@@ -2149,11 +2338,12 @@ notify pgrst, 'reload schema';`;
       const costRaw = String(($('[data-quote-field="unitCost"]', row) || {}).value || '').trim();
       if (!description && !quantityRaw && !priceRaw && !costRaw) return;
       const quantity = num(quantityRaw);
-      const unitPrice = num(priceRaw);
-      if (!description || !quantityRaw || !unit || !priceRaw || quantity <= 0 || unitPrice < 0 || (costRaw !== '' && num(costRaw) < 0)) { incomplete = true; return; }
-      items.push({ category, description, quantity, unit, unitPrice, unitCost: costRaw === '' ? null : num(costRaw), priceReference: ($('[data-quote-field="priceReference"]', row) || {}).value || '', priceReferenceUrl: ($('[data-quote-field="priceReferenceUrl"]', row) || {}).value || '', priceRange: ($('[data-quote-field="priceRange"]', row) || {}).value || '', priceReferenceNote: ($('[data-quote-field="priceReferenceNote"]', row) || {}).value || '' });
+      const unitPrice = parsedNumber(priceRaw);
+      const unitCost = costRaw === '' ? null : parsedNumber(costRaw);
+      if (!description || !quantityRaw || !unit || !priceRaw || quantity <= 0 || unitPrice == null || unitPrice < 0 || (costRaw !== '' && (unitCost == null || unitCost < 0))) { incomplete = true; return; }
+      items.push({ category, description, quantity, unit, unitPrice, unitCost, unitCostSource: ($('[data-quote-field="unitCostSource"]', row) || {}).value || '', coelcaReference: ($('[data-quote-field="coelcaReference"]', row) || {}).value || '', priceReference: ($('[data-quote-field="priceReference"]', row) || {}).value || '', priceReferenceUrl: ($('[data-quote-field="priceReferenceUrl"]', row) || {}).value || '', priceRange: ($('[data-quote-field="priceRange"]', row) || {}).value || '', priceReferenceNote: ($('[data-quote-field="priceReferenceNote"]', row) || {}).value || '' });
     });
-    if (incomplete) return { error: 'Completa la descripción, cantidad, unidad y precio de cada partida que hayas empezado.' };
+    if (incomplete) return { error: 'Revisa cada partida: usa importes válidos (por ejemplo, 1.234,50), una cantidad mayor que cero y completa descripción, unidad y precio de venta.' };
     if (!items.length) return { error: 'Añade al menos una partida detallada al presupuesto.' };
     return { items };
   }
@@ -2169,14 +2359,28 @@ notify pgrst, 'reload schema';`;
       const priceRaw = ($('[data-quote-field="unitPrice"]', row) || {}).value || '';
       const costRaw = ($('[data-quote-field="unitCost"]', row) || {}).value || '';
       const quantity = Math.max(0, num(($('[data-quote-field="quantity"]', row) || {}).value));
-      const price = Math.max(0, num(($('[data-quote-field="unitPrice"]', row) || {}).value));
+      const parsedPrice = parsedNumber(priceRaw);
+      const parsedCost = String(costRaw).trim() ? parsedNumber(costRaw) : null;
+      const invalidPrice = !!String(priceRaw).trim() && parsedPrice == null;
+      const invalidCost = !!String(costRaw).trim() && parsedCost == null;
+      const price = Math.max(0, parsedPrice == null ? 0 : parsedPrice);
       const lineTotal = quoteLineTotal({ quantity, unitPrice: price });
+      const unitCost = invalidCost ? null : quoteUnitCost({ description, quantity, unit, unitCost: parsedCost });
+      const lineCost = unitCost == null ? null : roundMoney(quantity * unitCost);
+      const lineProfit = lineCost == null || parsedPrice == null ? null : roundMoney(lineTotal - lineCost);
       base += lineTotal;
       if (String(description).trim() || String(quantityRaw).trim() || String(priceRaw).trim() || String(costRaw).trim()) {
-        profitLines.push({ description, quantity: quantityRaw, unit, unitPrice: priceRaw, unitCost: costRaw });
+        profitLines.push({ description, quantity: quantityRaw, unit, unitPrice: parsedPrice, unitCost: invalidCost ? null : parsedCost, invalidPrice, invalidCost });
       }
       const totalLabel = $('[data-quote-line-total]', row);
       if (totalLabel) totalLabel.textContent = money(lineTotal);
+      const costLabel = $('[data-quote-line-cost]', row);
+      if (costLabel) costLabel.textContent = lineCost == null ? 'Pendiente' : money(lineCost);
+      const profitLabel = $('[data-quote-line-profit]', row);
+      if (profitLabel) {
+        profitLabel.textContent = lineProfit == null ? 'Pendiente' : money(lineProfit);
+        profitLabel.dataset.state = lineProfit == null ? 'pending' : lineProfit < 0 ? 'loss' : 'profit';
+      }
     });
     base = roundMoney(base);
     const tax = roundMoney(base * rate / 100);
@@ -2754,6 +2958,13 @@ notify pgrst, 'reload schema';`;
       renderQuoteCatalog(form);
       return;
     }
+    if (action === 'coelca-import-file') { const input = $('#coelca-cost-file'); if (input) input.click(); return; }
+    if (action === 'coelca-cost-template') { downloadCoelcaCostTemplate(); return; }
+    if (action === 'coelca-clear-costs') {
+      if (!confirm('¿Vaciar los costes Coelca importados? Las partidas y presupuestos guardados no se borrarán.')) return;
+      if (commitChange(() => { data.company.coelcaCatalog = []; data._meta.companyUpdated = Date.now(); })) { render(); toast('Tarifa Coelca eliminada. Los costes ya guardados en presupuestos se conservan.', 'good'); }
+      return;
+    }
     if (action === 'add-quote-line') { addQuoteLine(target.closest('form')); return; }
     if (action === 'add-catalog-quote-line') { addCatalogQuoteLine(target.closest('form'), target.dataset.catalogId); return; }
     if (action === 'add-solar-quote-bundle') { addSolarQuoteBundle(target.closest('form')); return; }
@@ -2968,6 +3179,13 @@ notify pgrst, 'reload schema';`;
     if (event.target.form && event.target.form.id === 'entity-form' && $('[data-quote-line-list]', event.target.form)) updateQuoteTotals(event.target.form);
   });
   document.addEventListener('change', (event) => {
+    if (event.target.id === 'coelca-cost-file') {
+      const file = event.target.files && event.target.files[0];
+      const includesTax = $('[data-coelca-tax-mode]') && $('[data-coelca-tax-mode]').value === 'gross';
+      event.target.value = '';
+      if (file) importCoelcaCostFile(file, includesTax);
+      return;
+    }
     if (event.target.id === 'brand-logo-file') {
       const file = event.target.files && event.target.files[0];
       if (!file) return;

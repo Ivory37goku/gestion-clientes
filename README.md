@@ -42,7 +42,9 @@ Las capturas usan datos ficticios para enseñar la interfaz.
 - Resultado solar incluido en el presupuesto y en la propuesta compartida cuando la obra tiene un estudio guardado.
 - Catálogo de partidas fotovoltaicas con material, inversores, baterías, estructura, mano de obra, desplazamientos y legalización. Las cantidades y precios se pueden ajustar o guardar como tarifa propia.
 - Desglose de presupuesto con horas, trayectos, materiales, base imponible, IGIC y total. Se puede imprimir o guardar como PDF.
-- Coste interno por unidad, beneficio bruto estimado y porcentaje de margen. La app marca los cálculos incompletos, guarda los costes solo en la app y los excluye de facturas y propuestas para clientes.
+- Importación de la tarifa o factura de compra de Coelca en **Ajustes → Costes Coelca**. Los costes se guardan sin IGIC (la app puede descontarlo al importar), se reutilizan en partidas de presupuestos y permanecen separados del precio de venta.
+- Cálculo visible por partida de venta, coste directo y beneficio bruto, además del resumen de margen del presupuesto. Los importes aceptan decimales en formato español; la app avisa si falta un coste y nunca incluye los costes internos en facturas, propuestas ni PDF para clientes.
+- La tarifa profesional de Coelca depende de cada cuenta y no se inventa: importa el CSV de compra o usa la plantilla para cargarla una sola vez. Los precios públicos o referencias de mercado no sustituyen tu coste real negociado.
 
 ### Administración y marca
 
@@ -58,7 +60,7 @@ La paleta, el icono y el logo están a mano en **Administración → Marca** (ta
 | Plataforma | Descarga o acceso |
 | --- | --- |
 | Web / PWA | [Abrir Gestión Clientes](https://ivory37goku.github.io/gestion-clientes/) |
-| Android | [Descargar APK 1.0.19](https://raw.githubusercontent.com/Ivory37goku/gestion-clientes/main/downloads/gestion-clientes-1.0.19.apk) |
+| Android | [Descargar APK 1.0.20](https://raw.githubusercontent.com/Ivory37goku/gestion-clientes/main/downloads/gestion-clientes-1.0.20.apk) |
 | Windows | [Abrir las compilaciones de Windows](https://github.com/Ivory37goku/gestion-clientes/actions/workflows/windows.yml) |
 
 En Android, descarga el APK e instálalo desde el dispositivo. En Windows, abre la última ejecución correcta del workflow y descarga el artefacto `gestion-clientes-windows`, que contiene el instalador y la versión portable. La PWA también se puede añadir a la pantalla de inicio desde el navegador.
