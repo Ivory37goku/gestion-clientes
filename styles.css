@@ -68,6 +68,14 @@ html{scroll-behavior:smooth}body{margin:0;min-height:100vh;background:radial-gra
 .quote-profit-note{margin:9px 0 0;color:var(--muted);font-size:8px;line-height:1.45}
 .quote-breakdown{margin-top:16px}
 .quote-breakdown .table-wrap{margin-top:10px}
+.quote-materials-panel{margin-top:16px;padding:16px;border:1px solid var(--line-soft);border-radius:16px;background:linear-gradient(145deg,rgba(255,255,255,.035),rgba(255,255,255,.012))}
+.quote-materials-panel h3{margin:0;font-size:13px;letter-spacing:-.01em}
+.quote-materials-panel .card-head{align-items:flex-start}
+.quote-materials-panel .card-head>div{min-width:0}
+.quote-materials-panel .card-head p{margin:4px 0 0;color:var(--muted);font-size:10px}
+.quote-materials-panel .table-wrap{margin-top:10px}
+.material-reference{display:block;margin-top:3px;color:var(--muted);font-size:9px}
+.material-list-note{margin:10px 0 0;color:var(--muted);font-size:9px;line-height:1.55}
 .quote-total-row th{color:#111;background:#eef2f7;font-weight:800}
 .quote-legacy-note{margin-top:14px;padding:12px;border:1px dashed var(--line);border-radius:10px;color:var(--muted);font-size:10px}
 @media(max-width:740px){.quote-editor .card-head{flex-direction:column}.quote-editor .card-head .btn{width:100%}.quote-line-grid{grid-template-columns:repeat(2,minmax(0,1fr))}.quote-line-grid .quote-description,.quote-line-grid .quote-line-cost-field,.quote-line-total-wrap{grid-column:1/-1}.quote-line-total-wrap{padding:4px 0 8px}.quote-profit-head{flex-direction:column}.quote-profit-metrics{grid-template-columns:1fr}.coelca-import-actions{align-items:stretch;flex-direction:column}.coelca-import-actions>.field{width:100%}.coelca-import-actions .head-actions{justify-content:stretch}.coelca-import-actions .head-actions .btn{flex:1}}
@@ -81,6 +89,7 @@ html{scroll-behavior:smooth}body{margin:0;min-height:100vh;background:radial-gra
   #modal-root .modal-head h2,#modal-root .quote-breakdown h3{color:#111}
   #modal-root .close-btn{display:none!important}
   #modal-root .modal-foot{display:none}
+  #modal-root .quote-materials-panel{display:none!important}
   #modal-root .row-item,#modal-root .quote-line-card{background:#fff;color:#111;border-color:#ddd;box-shadow:none}
   #modal-root .quote-breakdown .table-wrap{overflow:visible;border-color:#bbb}
   #modal-root .quote-breakdown table{min-width:0}
