@@ -68,7 +68,7 @@ notify pgrst, 'reload schema';`;
     canary: { label: 'Green Group Canarias · junio 2026', url: 'https://greengroupcanarias.com/precio-placas-solares-canarias-2026/' },
     market: { label: 'GreenExperts · desglose residencial fotovoltaico 2026', url: 'https://greenexperts.es/guia-precios/placas-solares/precio-instalacion-fotovoltaica-5-kw/' },
     prices: { label: 'GreenExperts · desglose fotovoltaico 2026', url: 'https://greenexperts.es/guia-precios/placas-solares/instalar-placas-solares/' },
-    cype: { label: 'CYPE · generador de precios, coste directo', url: 'https://generadordeprecios.info/obra_nueva/Instalaciones/Electricas/Solar_fotovoltaica/Modulo_solar_fotovoltaico.html' },
+    cype: { label: 'CYPE · coste directo de mano de obra', url: 'https://www.generadordeprecios.info/obra_nueva/Instalaciones/Electricas/Puesta_a_tierra/Red_de_equipotencialidad.html' },
     preoc: { label: 'PREOC 2026 · módulo fotovoltaico 450 Wp instalado', url: 'https://www.preoc.es/base_de_precios/D45AG160/PANEL%20ERA%20450W%2024V%20MONOCRISTALINO%20PERC' },
     travel: { label: 'Tarifa publicada en Tenerife · consulta noviembre 2026', url: 'https://okservice.es/servicios/energias-renovables-tenerife' }
   };
@@ -84,8 +84,8 @@ notify pgrst, 'reload schema';`;
     { id: 'structure-flat', group: 'estructuras', category: 'Material', description: 'Estructura lastrada para cubierta plana · juego por módulo', unit: 'ud', unitPrice: 67, defaultQuantity: 12, panelWp: 450, quantityRule: 'panels', range: '700–900 € para 12 paneles', source: 'market', sourceNote: 'Referencia para estructura lastrada; valida cargas, viento, inclinación y membrana.' },
     { id: 'wiring-protection', group: 'electricos', category: 'Material', description: 'Cableado FV, conectores y protecciones DC/AC para sistema monofásico', unit: 'kWp', unitPrice: 80, defaultQuantity: 5, quantityRule: 'kwp', featured: true, range: '300–500 € para 5 kWp (60–100 €/kWp)', source: 'market', sourceNote: 'Precio prorrateado por potencia; dimensiona secciones, distancias y protecciones según proyecto y REBT.' },
     { id: 'mounting-labor', group: 'montaje', category: 'Mano de obra', description: 'Montaje, conexionado y puesta en marcha residencial · precio de referencia por kWp', unit: 'kWp', unitPrice: 300, defaultQuantity: 5, quantityRule: 'kwp', featured: true, range: '250–450 €/kWp', source: 'prices', sourceNote: 'Partida de mano de obra; evita duplicarla con horas del equipo o con un pack llave en mano.' },
-    { id: 'electrician-hour', group: 'montaje', category: 'Mano de obra', description: 'Oficial de 1.ª electricista · coste directo base de referencia', unit: 'horas', unitPrice: 25.52, defaultQuantity: 8, range: '25,52 €/hora de coste directo', source: 'cype', sourceNote: 'Coste directo base publicado por CYPE; añade tu estructura y margen comercial.' },
-    { id: 'helper-hour', group: 'montaje', category: 'Mano de obra', description: 'Ayudante electricista · coste directo base de referencia', unit: 'horas', unitPrice: 23.54, defaultQuantity: 8, range: '23,54 €/hora de coste directo', source: 'cype', sourceNote: 'Coste directo base publicado por CYPE; añade tu estructura y margen comercial.' },
+    { id: 'electrician-hour', group: 'montaje', category: 'Mano de obra', description: 'Oficial de 1.ª electricista · hora de trabajo', unit: 'horas', unitPrice: 52.5, unitCost: 25.52, defaultQuantity: 8, range: '52,50 €/h venta · 25,52 €/h coste CYPE', source: 'cype', sourceNote: 'Tarifa sugerida a partir de tu presupuesto reciente. Coste directo CYPE de referencia: 25,52 €/h. Ajusta ambos importes a la tarifa y coste reales de tu empresa.' },
+    { id: 'helper-hour', group: 'montaje', category: 'Mano de obra', description: 'Ayudante electricista · hora de trabajo', unit: 'horas', unitPrice: 23.54, defaultQuantity: 8, range: '23,54 €/hora de coste directo', source: 'cype', costOnly: true, sourceNote: 'CYPE publica este importe como coste directo interno, no como tarifa de venta. Indica el precio que cobrarás al cliente.' },
     { id: 'legalization', group: 'gestion', category: 'Otros', description: 'Memoria técnica, CIE y tramitación de autoconsumo residencial <10 kW', unit: 'servicio', unitPrice: 400, defaultQuantity: 1, featured: true, range: '300–500 €/servicio orientativo', source: 'market', sourceNote: 'Comprueba el alcance, tasas y requisitos concretos de la instalación en Canarias.' },
     { id: 'scaffold', group: 'montaje', category: 'Otros', description: 'Medios auxiliares por altura o acceso difícil (andamio/plataforma)', unit: 'servicio', unitPrice: 350, defaultQuantity: 1, range: '200–500 € adicionales', source: 'market', sourceNote: 'Añadir solo cuando la altura y el acceso lo requieran.' },
     { id: 'travel-visit', group: 'gestion', category: 'Desplazamiento', description: 'Desplazamiento técnico dentro de la isla · visita/trayecto', unit: 'trayecto', unitPrice: 50, defaultQuantity: 1, featured: true, range: '≈26,71–80,55 € con IGIC en la tarifa consultada', source: 'travel', sourceNote: 'Referencia de un servicio publicado en Tenerife; valor de partida aproximado sin IGIC. Ajusta por isla, distancia y viajes interinsulares.' },
@@ -472,7 +472,84 @@ notify pgrst, 'reload schema';`;
   }
   function roundMoney(value) { return Math.round((num(value) + Number.EPSILON) * 100) / 100; }
   function quoteLineTotal(item) { return roundMoney(Math.max(0, num(item.quantity)) * Math.max(0, num(item.unitPrice))); }
+  function quoteCostTotal(item) { return roundMoney(Math.max(0, num(item.quantity)) * Math.max(0, num(item.unitCost))); }
   function quoteBase(items) { return roundMoney((items || []).reduce((sum, item) => sum + quoteLineTotal(item), 0)); }
+  function quoteProfitStats(items, base) {
+    const lines = (items || []).filter(item => item && (
+      String(item.description || '').trim() ||
+      String(item.quantity == null ? '' : item.quantity).trim() ||
+      String(item.unitPrice == null ? '' : item.unitPrice).trim() ||
+      String(item.unitCost == null ? '' : item.unitCost).trim()
+    ));
+    if (!lines.length) return { state: 'empty', lineCount: 0, missingCosts: 0, incompleteLines: 0, costKnown: 0 };
+    const missingCosts = lines.filter(item => item.unitCost == null || String(item.unitCost).trim() === '').length;
+    const incompleteLines = lines.filter(item =>
+      !String(item.description || '').trim() ||
+      num(item.quantity) <= 0 ||
+      !String(item.unit || '').trim() ||
+      item.unitPrice == null ||
+      String(item.unitPrice).trim() === ''
+    ).length;
+    const costKnown = roundMoney(lines.reduce((sum, item) =>
+      item.unitCost == null || String(item.unitCost).trim() === '' ? sum : sum + quoteCostTotal(item), 0));
+    if (missingCosts || incompleteLines) return { state: 'incomplete', lineCount: lines.length, missingCosts, incompleteLines, costKnown };
+    const grossProfit = roundMoney(num(base) - costKnown);
+    return {
+      state: 'ready',
+      lineCount: lines.length,
+      missingCosts: 0,
+      incompleteLines: 0,
+      costKnown,
+      grossProfit,
+      marginRate: num(base) > 0 ? Math.round(grossProfit / num(base) * 1000) / 10 : 0
+    };
+  }
+  function quoteProfitSummaryMarkup() {
+    return '<section class="quote-profit-summary" data-quote-profit-summary data-state="empty" aria-live="polite"><div class="quote-profit-head"><div><p class="eyebrow">CONTROL INTERNO · PRIVADO</p><h3>Rentabilidad estimada</h3><p data-profit-status>Añade costes internos por partida para calcular el margen.</p></div><span class="quote-profit-badge" data-profit-badge>Sin calcular</span></div><div class="quote-profit-metrics"><div><span data-profit-cost-label>Coste directo total</span><strong data-profit-cost>—</strong></div><div><span data-profit-gross-label>Beneficio bruto estimado</span><strong data-profit-gross>—</strong></div><div><span>Margen sobre la base</span><strong data-profit-margin>—</strong></div></div><p class="quote-profit-note">Base del presupuesto menos los costes directos anotados. No incluye gastos fijos, financiación ni impuestos sobre beneficios. El coste interno nunca se envía al cliente.</p></section>';
+  }
+  function updateQuoteProfitSummary(root, stats) {
+    if (!root || !stats) return;
+    root.dataset.state = stats.state;
+    const status = $('[data-profit-status]', root);
+    const badge = $('[data-profit-badge]', root);
+    const costLabel = $('[data-profit-cost-label]', root);
+    const cost = $('[data-profit-cost]', root);
+    const grossLabel = $('[data-profit-gross-label]', root);
+    const gross = $('[data-profit-gross]', root);
+    const margin = $('[data-profit-margin]', root);
+    if (stats.state === 'empty') {
+      if (status) status.textContent = 'Añade partidas y costes internos para calcular el margen.';
+      if (badge) badge.textContent = 'Sin calcular';
+      if (costLabel) costLabel.textContent = 'Coste directo total';
+      if (cost) cost.textContent = '—';
+      if (grossLabel) grossLabel.textContent = 'Beneficio bruto estimado';
+      if (gross) gross.textContent = '—';
+      if (margin) margin.textContent = '—';
+      return;
+    }
+    if (stats.state === 'incomplete') {
+      const messages = [];
+      if (stats.missingCosts) messages.push('Falta el coste interno en ' + stats.missingCosts + (stats.missingCosts === 1 ? ' partida' : ' partidas'));
+      if (stats.incompleteLines) messages.push('Completa la descripción, cantidad y precio de venta en ' + stats.incompleteLines + (stats.incompleteLines === 1 ? ' partida' : ' partidas'));
+      if (status) status.textContent = messages.join('. ') + '.';
+      if (badge) badge.textContent = 'Costes pendientes';
+      if (costLabel) costLabel.textContent = 'Costes anotados (parcial)';
+      if (cost) cost.textContent = stats.costKnown > 0 ? money(stats.costKnown) : '—';
+      if (grossLabel) grossLabel.textContent = 'Beneficio bruto estimado';
+      if (gross) gross.textContent = '—';
+      if (margin) margin.textContent = '—';
+      return;
+    }
+    const negative = stats.grossProfit < 0;
+    root.dataset.state = negative ? 'loss' : 'ready';
+    if (status) status.textContent = negative ? 'Los costes directos superan la base del presupuesto.' : 'Cálculo completo con los costes internos anotados.';
+    if (badge) badge.textContent = (negative ? 'Pérdida bruta · ' : 'Margen bruto · ') + solarNumber(stats.marginRate) + '%';
+    if (costLabel) costLabel.textContent = 'Coste directo total';
+    if (cost) cost.textContent = money(stats.costKnown);
+    if (grossLabel) grossLabel.textContent = negative ? 'Pérdida bruta estimada' : 'Beneficio bruto estimado';
+    if (gross) gross.textContent = money(Math.abs(stats.grossProfit));
+    if (margin) margin.textContent = solarNumber(stats.marginRate) + '%';
+  }
   function taxAmount(row) { return roundMoney(Math.max(0, num(row.amount)) * Math.max(0, num(row.taxRate)) / 100); }
   function total(row) { return roundMoney(Math.max(0, num(row.amount)) + taxAmount(row)); }
   function paidFor(invoice) { return data.payments.filter(p => p.invoiceId === invoice.id).reduce((s, p) => s + num(p.amount), 0); }
@@ -1822,14 +1899,16 @@ notify pgrst, 'reload schema';`;
     if (type === 'payment') { add('Factura', selected(data.invoices, item.invoiceId)); add('Fecha', dateFmt(item.date)); add('Método', item.method); add('Importe', money(item.amount)); add('Notas', item.notes); }
     const extraActions = type === 'lead' && !item.clientId && item.stage !== 'Perdido' ? '<button type="button" class="btn btn-primary btn-sm" data-action="convert-lead" data-id="' + esc(id) + '">Pasar a cliente</button>' : type === 'quote' ? '<button class="btn btn-sm" data-action="print">Imprimir / guardar PDF</button><button type="button" class="btn btn-sm" data-action="share-quote" data-id="' + esc(id) + '">Vista de cliente / compartir</button>' + (item.status !== 'Rechazada' ? '<button class="btn btn-primary btn-sm" data-action="quote-to-invoice" data-id="' + esc(id) + '">Crear factura</button>' : '') : type === 'invoice' ? '<button class="btn btn-sm" data-action="print">Imprimir / guardar PDF</button>' + (outstanding(item) > 0 ? '<button class="btn btn-primary btn-sm" data-action="payment" data-id="' + esc(id) + '">Registrar cobro</button>' : '') : '';
     const breakdown = type === 'quote' ? quoteBreakdown(item) : type === 'invoice' && Array.isArray(item.items) && item.items.length ? quoteBreakdown(item) : '';
+    const internalProfit = ['quote', 'invoice'].includes(type) ? quoteProfitSummaryMarkup() : '';
     const processPanel = type === 'lead' ? leadProcessPanel(item) : ['client', 'work'].includes(type) ? clientWorkProcessPanel(type, item, id) : '';
     const solarPanel = type === 'work' ? renderSolarStudyPanel(item, id) : '';
     const locationPanel = renderLocationPanel(type, item);
     const activityPanel = activityTimeline(type, item);
     const relationships = renderRelationships(type, item, id);
     const documentHeader = ['quote', 'invoice'].includes(type) ? documentBrandMarkup(type, item) : '';
-    const modal = '<div class="modal-backdrop" data-action="backdrop"><section class="modal" role="dialog" aria-modal="true" aria-labelledby="detail-title"><div class="modal-head"><h2 id="detail-title">' + esc(title) + '</h2><button type="button" class="close-btn" data-action="close-modal" aria-label="Cerrar">×</button></div><div class="modal-body">' + documentHeader + processPanel + solarPanel + activityPanel + locationPanel + '<div class="list">' + facts.join('') + '</div>' + breakdown + relationships + '</div><div class="modal-foot"><div>' + extraActions + '</div><div><button type="button" class="btn btn-danger btn-sm" data-action="delete" data-type="' + type + '" data-id="' + esc(id) + '">Eliminar</button><button type="button" class="btn btn-primary btn-sm" data-action="edit" data-type="' + type + '" data-id="' + esc(id) + '">Editar</button></div></div></section></div>';
+    const modal = '<div class="modal-backdrop" data-action="backdrop"><section class="modal" role="dialog" aria-modal="true" aria-labelledby="detail-title"><div class="modal-head"><h2 id="detail-title">' + esc(title) + '</h2><button type="button" class="close-btn" data-action="close-modal" aria-label="Cerrar">×</button></div><div class="modal-body">' + documentHeader + processPanel + solarPanel + activityPanel + locationPanel + '<div class="list">' + facts.join('') + '</div>' + breakdown + internalProfit + relationships + '</div><div class="modal-foot"><div>' + extraActions + '</div><div><button type="button" class="btn btn-danger btn-sm" data-action="delete" data-type="' + type + '" data-id="' + esc(id) + '">Eliminar</button><button type="button" class="btn btn-primary btn-sm" data-action="edit" data-type="' + type + '" data-id="' + esc(id) + '">Editar</button></div></div></section></div>';
     $('#modal-root').innerHTML = modal;
+    if (internalProfit) updateQuoteProfitSummary($('.quote-profit-summary', $('#modal-root')), quoteProfitStats(item.items, item.amount));
   }
 
   const FIELDS = {
@@ -1895,6 +1974,7 @@ notify pgrst, 'reload schema';`;
   function quoteLineMarkup(item) {
     const category = item.category || 'Mano de obra';
     const unit = item.unit == null ? quoteDefaultUnit(category) : String(item.unit);
+    const unitCost = item.unitCost == null ? '' : item.unitCost;
     const priceReference = item.priceReference || '';
     const priceReferenceUrl = item.priceReferenceUrl || '';
     const priceRange = item.priceRange || '';
@@ -1907,9 +1987,10 @@ notify pgrst, 'reload schema';`;
       '<div class="field quote-description"><label for="' + lineId + '-description">Descripción</label><input id="' + lineId + '-description" data-quote-field="description" type="text" value="' + esc(item.description || '') + '" placeholder="Ej.: Instalación, desplazamiento a obra, cemento"></div>' +
       '<div class="field"><label for="' + lineId + '-quantity">Cantidad</label><input id="' + lineId + '-quantity" data-quote-field="quantity" type="number" min="0.01" step="0.01" value="' + esc(item.quantity == null ? '' : item.quantity) + '" placeholder="0"></div>' +
       '<div class="field"><label for="' + lineId + '-unit">Unidad</label><input id="' + lineId + '-unit" data-quote-field="unit" type="text" data-auto-unit="' + autoUnit + '" value="' + esc(unit) + '" placeholder="horas, km, ud"></div>' +
-      '<div class="field"><label for="' + lineId + '-price">Precio por unidad (€)</label><input id="' + lineId + '-price" data-quote-field="unitPrice" type="number" min="0" step="0.01" value="' + esc(item.unitPrice == null ? '' : item.unitPrice) + '" placeholder="0,00"></div>' +
+      '<div class="field"><label for="' + lineId + '-price">Precio de venta / unidad (€)</label><input id="' + lineId + '-price" data-quote-field="unitPrice" type="number" min="0" step="0.01" value="' + esc(item.unitPrice == null ? '' : item.unitPrice) + '" placeholder="0,00"></div>' +
+      '<div class="field quote-line-cost-field"><label for="' + lineId + '-cost">Coste interno / unidad (€)</label><input id="' + lineId + '-cost" data-quote-field="unitCost" type="number" min="0" step="0.01" value="' + esc(unitCost) + '" placeholder="Coste real"><span class="hint">Solo para tu margen; no se comparte.</span></div>' +
       '<div class="quote-line-total-wrap"><span>Importe de la partida</span><strong data-quote-line-total>0,00 €</strong></div>' +
-      '</div><div class="quote-line-actions"><span class="muted small">Cantidad × precio por unidad</span>' + (priceReference ? '<small class="quote-line-reference">Referencia ' + esc(priceRange ? priceRange + ' · ' : '') + (priceReferenceUrl ? '<a href="' + esc(safeHref(priceReferenceUrl)) + '" target="_blank" rel="noopener">' + esc(priceReference) + ' ↗</a>' : esc(priceReference)) + (priceReferenceNote ? ' · ' + esc(priceReferenceNote) : '') + '</small>' : '') + '<button type="button" class="tiny-btn" data-action="save-quote-line-to-catalog">Guardar en mi catálogo</button><button type="button" class="tiny-btn danger" data-action="remove-quote-line" aria-label="Quitar esta partida">Quitar partida</button></div><input type="hidden" data-quote-field="priceReference" value="' + esc(priceReference) + '"><input type="hidden" data-quote-field="priceReferenceUrl" value="' + esc(priceReferenceUrl) + '"><input type="hidden" data-quote-field="priceRange" value="' + esc(priceRange) + '"><input type="hidden" data-quote-field="priceReferenceNote" value="' + esc(priceReferenceNote) + '"></article>';
+      '</div><div class="quote-line-actions"><span class="muted small">Cantidad × precio cobrado. Añade tu coste para calcular rentabilidad.</span>' + (priceReference ? '<small class="quote-line-reference">Referencia ' + esc(priceRange ? priceRange + ' · ' : '') + (priceReferenceUrl ? '<a href="' + esc(safeHref(priceReferenceUrl)) + '" target="_blank" rel="noopener">' + esc(priceReference) + ' ↗</a>' : esc(priceReference)) + (priceReferenceNote ? ' · ' + esc(priceReferenceNote) : '') + '</small>' : '') + '<button type="button" class="tiny-btn" data-action="save-quote-line-to-catalog">Guardar en mi catálogo</button><button type="button" class="tiny-btn danger" data-action="remove-quote-line" aria-label="Quitar esta partida">Quitar partida</button></div><input type="hidden" data-quote-field="priceReference" value="' + esc(priceReference) + '"><input type="hidden" data-quote-field="priceReferenceUrl" value="' + esc(priceReferenceUrl) + '"><input type="hidden" data-quote-field="priceRange" value="' + esc(priceRange) + '"><input type="hidden" data-quote-field="priceReferenceNote" value="' + esc(priceReferenceNote) + '"></article>';
   }
   function quoteItemsForForm(item) {
     if (Array.isArray(item.items) && item.items.length) return clone(item.items);
@@ -1917,7 +1998,7 @@ notify pgrst, 'reload schema';`;
     return [{ category: 'Mano de obra', description: '', quantity: '', unit: 'horas', unitPrice: '' }];
   }
   function quoteEditorMarkup(items, includeCatalog, workId) {
-    return '<section class="quote-editor"><div class="card-head"><div><h3>Desglose del presupuesto</h3><p>Horas, desplazamiento, materiales, montaje e IGIC, con partidas listas para usar.</p></div><button type="button" class="btn btn-sm" data-action="add-quote-line">＋ Añadir partida manual</button></div>' + (includeCatalog ? quoteCatalogMarkup(workId) : '') + '<div class="quote-line-list" data-quote-line-list>' + (items || []).map(quoteLineMarkup).join('') + '</div><div class="quote-summary"><div><span>Base imponible</span><strong data-quote-base>0,00 €</strong></div><div><span>IGIC (<b data-quote-tax-rate>7</b> %)</span><strong data-quote-tax>0,00 €</strong></div><div class="quote-summary-total"><span>Total</span><strong data-quote-total>0,00 €</strong></div></div><p class="modal-note">' + (includeCatalog ? 'Precios de referencia 2026, editables y ajustables a tu tarifa. El desglose sugerido calcula cantidades iniciales a partir de los kWp y número de paneles; revisa cubierta, recorridos y alcance antes de enviar. Los packs llave en mano ya incluyen partidas: no los combines con los mismos trabajos desglosados.' : 'Importes calculados automáticamente a partir del desglose.') + '</p></section>';
+    return '<section class="quote-editor"><div class="card-head"><div><h3>Desglose del presupuesto</h3><p>Horas, desplazamiento, materiales, montaje e IGIC, con partidas listas para usar.</p></div><button type="button" class="btn btn-sm" data-action="add-quote-line">＋ Añadir partida manual</button></div>' + (includeCatalog ? quoteCatalogMarkup(workId) : '') + '<div class="quote-line-list" data-quote-line-list>' + (items || []).map(quoteLineMarkup).join('') + '</div><div class="quote-summary"><div><span>Base imponible</span><strong data-quote-base>0,00 €</strong></div><div><span>IGIC (<b data-quote-tax-rate>7</b> %)</span><strong data-quote-tax>0,00 €</strong></div><div class="quote-summary-total"><span>Total</span><strong data-quote-total>0,00 €</strong></div></div>' + quoteProfitSummaryMarkup() + '<p class="modal-note">' + (includeCatalog ? 'Los precios orientativos son tarifas de venta editables. CYPE se muestra como coste directo y exige que indiques tu precio de venta. El desglose sugerido calcula cantidades iniciales a partir de los kWp y paneles; revisa cubierta, recorridos y alcance. Los packs llave en mano ya incluyen trabajos: no los combines con las mismas partidas desglosadas.' : 'Los costes internos y el margen son privados; no se incluyen en presupuestos, facturas ni propuestas compartidas.') + '</p></section>';
   }
   function quotePowerForWork(workId) {
     const work = data.works.find(row => row.id === workId);
@@ -1946,8 +2027,9 @@ notify pgrst, 'reload schema';`;
   function quoteCatalogCardMarkup(item) {
     const source = SOLAR_PRICE_SOURCES[item.source] || {};
     const savedPrice = customCatalogPriceFor(item);
+    const costOnly = !!(item.costOnly && !savedPrice);
     const sourceLabel = savedPrice ? 'Tu tarifa guardada aplicada' : source.label || 'Precio de referencia';
-    return '<article class="quote-catalog-card"><div class="quote-catalog-card-copy"><span class="quote-catalog-type">' + esc(item.category) + '</span><strong>' + esc(item.description) + '</strong><small>' + esc(item.range || '') + '</small></div><div class="quote-catalog-card-bottom"><div><strong>' + esc(money(catalogEffectivePrice(item))) + '</strong><span>por ' + esc(item.unit) + '</span></div><button type="button" class="btn btn-sm btn-primary" data-action="add-catalog-quote-line" data-catalog-id="' + esc(item.id) + '">Añadir</button></div><small class="quote-catalog-source">' + (savedPrice ? esc(sourceLabel) + (source.url ? ' · referencia: <a href="' + esc(source.url) + '" target="_blank" rel="noopener">' + esc(source.label || 'precio de referencia') + ' ↗</a>' : '') : source.url ? '<a href="' + esc(source.url) + '" target="_blank" rel="noopener">' + esc(source.label) + ' ↗</a>' : esc(sourceLabel)) + (item.sourceNote ? ' · ' + esc(item.sourceNote) : '') + '</small>' + (item.personal ? '<button type="button" class="tiny-btn danger" data-action="remove-saved-quote-catalog-item" data-catalog-id="' + esc(item.id) + '">Quitar de mi catálogo</button>' : '') + '</article>';
+    return '<article class="quote-catalog-card"><div class="quote-catalog-card-copy"><span class="quote-catalog-type">' + esc(item.category) + '</span><strong>' + esc(item.description) + '</strong><small>' + esc(item.range || '') + '</small></div><div class="quote-catalog-card-bottom"><div><strong>' + esc(money(catalogEffectivePrice(item))) + '</strong><span>' + (costOnly ? 'coste directo / ' + esc(item.unit) : 'por ' + esc(item.unit)) + '</span></div><button type="button" class="btn btn-sm btn-primary" data-action="add-catalog-quote-line" data-catalog-id="' + esc(item.id) + '">' + (costOnly ? 'Añadir coste' : 'Añadir') + '</button></div><small class="quote-catalog-source">' + (savedPrice ? esc(sourceLabel) + (source.url ? ' · referencia: <a href="' + esc(source.url) + '" target="_blank" rel="noopener">' + esc(source.label || 'precio de referencia') + ' ↗</a>' : '') : source.url ? '<a href="' + esc(source.url) + '" target="_blank" rel="noopener">' + esc(source.label) + ' ↗</a>' : esc(sourceLabel)) + (item.sourceNote ? ' · ' + esc(item.sourceNote) : '') + '</small>' + (item.personal ? '<button type="button" class="tiny-btn danger" data-action="remove-saved-quote-catalog-item" data-catalog-id="' + esc(item.id) + '">Quitar de mi catálogo</button>' : '') + '</article>';
   }
   function renderQuoteCatalog(form) {
     const results = $('[data-catalog-results]', form);
@@ -1977,8 +2059,9 @@ notify pgrst, 'reload schema';`;
   function catalogLineForItem(item, form, quantity) {
     const source = SOLAR_PRICE_SOURCES[item.source] || {};
     const saved = customCatalogPriceFor(item);
+    const costOnly = !!(item.costOnly && !saved);
     const suggestedQuantity = item.quantityRule ? suggestedCatalogQuantity(item, form) : saved && saved.defaultQuantity || item.defaultQuantity || 1;
-    return { category: item.category || 'Otros', description: item.description, quantity: quantity == null ? suggestedQuantity : quantity, unit: item.unit || 'ud', unitPrice: catalogEffectivePrice(item), priceReference: saved ? 'Mi tarifa guardada' : source.label || '', priceReferenceUrl: source.url || '', priceRange: saved ? '' : item.range || '', priceReferenceNote: saved ? 'Se ha aplicado la tarifa que guardaste para tu empresa.' : item.sourceNote || '' };
+    return { category: item.category || 'Otros', description: item.description, quantity: quantity == null ? suggestedQuantity : quantity, unit: item.unit || 'ud', unitPrice: costOnly ? '' : catalogEffectivePrice(item), unitCost: saved && saved.unitCost != null ? saved.unitCost : item.unitCost != null ? num(item.unitCost) : item.costOnly ? num(item.unitPrice) : '', priceReference: saved ? 'Mi tarifa guardada' : source.label || '', priceReferenceUrl: source.url || '', priceRange: saved ? '' : item.range || '', priceReferenceNote: costOnly ? 'El importe CYPE se guarda como coste interno. Escribe aparte la tarifa que cobrarás al cliente.' : saved ? 'Se ha aplicado tu tarifa guardada; el coste interno se conserva para calcular el margen.' : item.sourceNote || '' };
   }
   function addCatalogQuoteLine(form, catalogId) {
     if (!form) return;
@@ -2027,11 +2110,12 @@ notify pgrst, 'reload schema';`;
     const description = (($('[data-quote-field="description"]', row) || {}).value || '').trim();
     const unit = (($('[data-quote-field="unit"]', row) || {}).value || '').trim();
     const priceRaw = (($('[data-quote-field="unitPrice"]', row) || {}).value || '').trim();
+    const costRaw = (($('[data-quote-field="unitCost"]', row) || {}).value || '').trim();
     const quantity = num(($('[data-quote-field="quantity"]', row) || {}).value) || 1;
     if (!description || !unit || !priceRaw || num(priceRaw) < 0) return toast('Completa descripción, unidad y precio antes de guardar esta partida.', 'bad');
     const saved = (data.company.quoteCatalog || []).slice();
     const existing = saved.find(item => normalizeSearchText(item.description) === normalizeSearchText(description) && normalizeSearchText(item.unit) === normalizeSearchText(unit));
-    const catalogItem = { id: existing && existing.id || 'personal-' + uid(), group: 'personal', personal: true, category, description, unit, unitPrice: num(priceRaw), defaultQuantity: quantity, source: 'custom', sourceNote: 'Tarifa guardada por la empresa. Puedes editar el precio en cada presupuesto.' };
+    const catalogItem = { id: existing && existing.id || 'personal-' + uid(), group: 'personal', personal: true, category, description, unit, unitPrice: num(priceRaw), unitCost: costRaw === '' ? null : num(costRaw), defaultQuantity: quantity, source: 'custom', sourceNote: 'Tarifa guardada por la empresa. Puedes editar el precio y el coste interno en cada presupuesto.' };
     if (!commitChange(() => {
       const current = data.company.quoteCatalog || [];
       const index = current.findIndex(item => item.id === catalogItem.id);
@@ -2062,11 +2146,12 @@ notify pgrst, 'reload schema';`;
       const quantityRaw = $('[data-quote-field="quantity"]', row).value.trim();
       const unit = $('[data-quote-field="unit"]', row).value.trim();
       const priceRaw = $('[data-quote-field="unitPrice"]', row).value.trim();
-      if (!description && !quantityRaw && !priceRaw) return;
+      const costRaw = String(($('[data-quote-field="unitCost"]', row) || {}).value || '').trim();
+      if (!description && !quantityRaw && !priceRaw && !costRaw) return;
       const quantity = num(quantityRaw);
       const unitPrice = num(priceRaw);
-      if (!description || !quantityRaw || !unit || !priceRaw || quantity <= 0 || unitPrice < 0) { incomplete = true; return; }
-      items.push({ category, description, quantity, unit, unitPrice, priceReference: ($('[data-quote-field="priceReference"]', row) || {}).value || '', priceReferenceUrl: ($('[data-quote-field="priceReferenceUrl"]', row) || {}).value || '', priceRange: ($('[data-quote-field="priceRange"]', row) || {}).value || '', priceReferenceNote: ($('[data-quote-field="priceReferenceNote"]', row) || {}).value || '' });
+      if (!description || !quantityRaw || !unit || !priceRaw || quantity <= 0 || unitPrice < 0 || (costRaw !== '' && num(costRaw) < 0)) { incomplete = true; return; }
+      items.push({ category, description, quantity, unit, unitPrice, unitCost: costRaw === '' ? null : num(costRaw), priceReference: ($('[data-quote-field="priceReference"]', row) || {}).value || '', priceReferenceUrl: ($('[data-quote-field="priceReferenceUrl"]', row) || {}).value || '', priceRange: ($('[data-quote-field="priceRange"]', row) || {}).value || '', priceReferenceNote: ($('[data-quote-field="priceReferenceNote"]', row) || {}).value || '' });
     });
     if (incomplete) return { error: 'Completa la descripción, cantidad, unidad y precio de cada partida que hayas empezado.' };
     if (!items.length) return { error: 'Añade al menos una partida detallada al presupuesto.' };
@@ -2076,11 +2161,20 @@ notify pgrst, 'reload schema';`;
     if (!form) return;
     const rate = Math.max(0, num(($('[name="taxRate"]', form) || {}).value));
     let base = 0;
+    const profitLines = [];
     $$('.quote-line-card', form).forEach(row => {
+      const description = ($('[data-quote-field="description"]', row) || {}).value || '';
+      const quantityRaw = ($('[data-quote-field="quantity"]', row) || {}).value || '';
+      const unit = ($('[data-quote-field="unit"]', row) || {}).value || '';
+      const priceRaw = ($('[data-quote-field="unitPrice"]', row) || {}).value || '';
+      const costRaw = ($('[data-quote-field="unitCost"]', row) || {}).value || '';
       const quantity = Math.max(0, num(($('[data-quote-field="quantity"]', row) || {}).value));
       const price = Math.max(0, num(($('[data-quote-field="unitPrice"]', row) || {}).value));
       const lineTotal = quoteLineTotal({ quantity, unitPrice: price });
       base += lineTotal;
+      if (String(description).trim() || String(quantityRaw).trim() || String(priceRaw).trim() || String(costRaw).trim()) {
+        profitLines.push({ description, quantity: quantityRaw, unit, unitPrice: priceRaw, unitCost: costRaw });
+      }
       const totalLabel = $('[data-quote-line-total]', row);
       if (totalLabel) totalLabel.textContent = money(lineTotal);
     });
@@ -2094,6 +2188,7 @@ notify pgrst, 'reload schema';`;
     if (taxLabel) taxLabel.textContent = money(tax);
     if (totalLabel) totalLabel.textContent = money(base + tax);
     if (rateLabel) rateLabel.textContent = String(rate).replace('.', ',');
+    updateQuoteProfitSummary($('[data-quote-profit-summary]', form), quoteProfitStats(profitLines, base));
   }
   function addQuoteLine(form) {
     const list = $('[data-quote-line-list]', form);

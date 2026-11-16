@@ -42,6 +42,7 @@ Las capturas usan datos ficticios para enseñar la interfaz.
 - Resultado solar incluido en el presupuesto y en la propuesta compartida cuando la obra tiene un estudio guardado.
 - Catálogo de partidas fotovoltaicas con material, inversores, baterías, estructura, mano de obra, desplazamientos y legalización. Las cantidades y precios se pueden ajustar o guardar como tarifa propia.
 - Desglose de presupuesto con horas, trayectos, materiales, base imponible, IGIC y total. Se puede imprimir o guardar como PDF.
+- Coste interno por unidad, beneficio bruto estimado y porcentaje de margen. La app marca los cálculos incompletos, guarda los costes solo en la app y los excluye de facturas y propuestas para clientes.
 
 ### Administración y marca
 
@@ -57,7 +58,7 @@ La paleta, el icono y el logo están a mano en **Administración → Marca** (ta
 | Plataforma | Descarga o acceso |
 | --- | --- |
 | Web / PWA | [Abrir Gestión Clientes](https://ivory37goku.github.io/gestion-clientes/) |
-| Android | [Descargar APK 1.0.18](https://raw.githubusercontent.com/Ivory37goku/gestion-clientes/main/downloads/gestion-clientes-1.0.18.apk) |
+| Android | [Descargar APK 1.0.19](https://raw.githubusercontent.com/Ivory37goku/gestion-clientes/main/downloads/gestion-clientes-1.0.19.apk) |
 | Windows | [Abrir las compilaciones de Windows](https://github.com/Ivory37goku/gestion-clientes/actions/workflows/windows.yml) |
 
 En Android, descarga el APK e instálalo desde el dispositivo. En Windows, abre la última ejecución correcta del workflow y descarga el artefacto `gestion-clientes-windows`, que contiene el instalador y la versión portable. La PWA también se puede añadir a la pantalla de inicio desde el navegador.

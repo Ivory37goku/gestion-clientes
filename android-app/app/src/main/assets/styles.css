@@ -38,6 +38,7 @@ html{scroll-behavior:smooth}body{margin:0;min-height:100vh;background:radial-gra
 .quote-line-card{padding:12px;border:1px solid var(--line-soft);border-radius:12px;background:rgba(255,255,255,.018)}
 .quote-line-grid{display:grid;grid-template-columns:repeat(6,minmax(0,1fr));gap:10px;align-items:end}
 .quote-line-grid .quote-description{grid-column:span 2}
+.quote-line-grid .quote-line-cost-field{grid-column:span 2}
 .quote-line-total-wrap{display:flex;flex-direction:column;gap:5px;min-width:0;padding-bottom:9px;color:var(--muted);font-size:9px}
 .quote-line-total-wrap strong{color:var(--text);font-size:12px;font-variant-numeric:tabular-nums}
 .quote-line-actions{display:flex;align-items:center;justify-content:space-between;gap:8px;margin-top:6px}
@@ -46,13 +47,31 @@ html{scroll-behavior:smooth}body{margin:0;min-height:100vh;background:radial-gra
 .quote-summary strong{color:var(--text);font-variant-numeric:tabular-nums}
 .quote-summary .quote-summary-total{padding-top:8px;border-top:1px solid var(--line);color:var(--text);font-weight:800;font-size:12px}
 .quote-summary-total strong{color:var(--brand);font-size:15px}
+.quote-line-cost-field .hint{margin-top:2px;font-size:8px}
+.quote-profit-summary{margin-top:12px;padding:13px;border:1px solid rgb(var(--brand-rgb) / .2);border-radius:13px;background:linear-gradient(135deg,rgb(var(--brand-rgb) / .07),rgba(255,255,255,.018))}
+.quote-profit-head{display:flex;align-items:flex-start;justify-content:space-between;gap:12px}
+.quote-profit-head .eyebrow{margin:0 0 4px;color:var(--brand);font-size:8px;font-weight:850;letter-spacing:.12em}
+.quote-profit-head h3{margin:0;color:var(--text);font-size:12px}
+.quote-profit-head p:not(.eyebrow){margin:4px 0 0;color:var(--muted);font-size:9px;line-height:1.45}
+.quote-profit-badge{flex:none;padding:5px 8px;border:1px solid var(--line);border-radius:999px;color:var(--muted);font-size:8px;font-weight:800}
+.quote-profit-summary[data-state="incomplete"] .quote-profit-badge{border-color:rgba(255,167,38,.3);background:rgba(255,167,38,.08);color:var(--warn)}
+.quote-profit-summary[data-state="ready"] .quote-profit-badge{border-color:rgba(166,217,74,.28);background:rgba(166,217,74,.08);color:var(--ok)}
+.quote-profit-summary[data-state="loss"] .quote-profit-badge{border-color:rgba(248,113,113,.32);background:rgba(248,113,113,.08);color:var(--bad)}
+.quote-profit-metrics{display:grid;grid-template-columns:repeat(3,minmax(0,1fr));gap:8px;margin-top:11px}
+.quote-profit-metrics>div{display:grid;gap:4px;min-width:0;padding:9px;border:1px solid var(--line-soft);border-radius:9px;background:rgba(8,15,27,.22)}
+.quote-profit-metrics span{color:var(--muted);font-size:8px}
+.quote-profit-metrics strong{overflow:hidden;color:var(--text);font-size:11px;font-variant-numeric:tabular-nums;text-overflow:ellipsis}
+.quote-profit-summary[data-state="ready"] [data-profit-gross]{color:var(--ok)}
+.quote-profit-summary[data-state="loss"] [data-profit-gross],.quote-profit-summary[data-state="loss"] [data-profit-margin]{color:var(--bad)}
+.quote-profit-note{margin:9px 0 0;color:var(--muted);font-size:8px;line-height:1.45}
 .quote-breakdown{margin-top:16px}
 .quote-breakdown .table-wrap{margin-top:10px}
 .quote-total-row th{color:#111;background:#eef2f7;font-weight:800}
 .quote-legacy-note{margin-top:14px;padding:12px;border:1px dashed var(--line);border-radius:10px;color:var(--muted);font-size:10px}
-@media(max-width:740px){.quote-editor .card-head{flex-direction:column}.quote-editor .card-head .btn{width:100%}.quote-line-grid{grid-template-columns:repeat(2,minmax(0,1fr))}.quote-line-grid .quote-description{grid-column:1/-1}.quote-line-total-wrap{padding:4px 0 8px}}
+@media(max-width:740px){.quote-editor .card-head{flex-direction:column}.quote-editor .card-head .btn{width:100%}.quote-line-grid{grid-template-columns:repeat(2,minmax(0,1fr))}.quote-line-grid .quote-description,.quote-line-grid .quote-line-cost-field{grid-column:1/-1}.quote-line-total-wrap{padding:4px 0 8px}.quote-profit-head{flex-direction:column}.quote-profit-metrics{grid-template-columns:1fr}}
 @media print{
   body:has(#modal-root .quote-breakdown) #main{display:none!important}
+  #modal-root .quote-profit-summary{display:none!important}
   #modal-root .modal-backdrop{position:static;inset:auto;display:block;padding:0;background:#fff;backdrop-filter:none}
   #modal-root .modal{width:100%;max-height:none;overflow:visible;border:0;border-radius:0;background:#fff;color:#111;box-shadow:none}
   #modal-root .modal-head,#modal-root .modal-body{position:static;padding:12px 0;background:#fff;color:#111;backdrop-filter:none}
@@ -227,6 +246,8 @@ html[data-theme="light"] .quote-line-card,html[data-theme="light"] .quick-action
 html[data-theme="light"] .quote-line-card{border-color:var(--line)}
 html[data-theme="light"] .quote-summary{background:#fff;border-color:var(--line)}
 html[data-theme="light"] .quote-summary span,html[data-theme="light"] .quote-summary strong,html[data-theme="light"] .quote-line-total-wrap strong{color:var(--text)}
+html[data-theme="light"] .quote-profit-summary{background:linear-gradient(135deg,rgb(var(--brand-rgb) / .06),#fff)}
+html[data-theme="light"] .quote-profit-metrics>div{background:rgba(28,38,22,.025)}
 html[data-theme="light"] .context-panel{border-color:rgb(var(--brand-rgb) / .2);background:linear-gradient(135deg,rgb(var(--brand-rgb) / .065),rgba(255,255,255,.8) 54%,rgba(250,247,238,.9))}
 html[data-theme="light"] .flow-step,html[data-theme="light"] .relationship-group{background:rgba(28,38,22,.025)}
 html[data-theme="light"] .flow-step.is-active{color:var(--text)}
