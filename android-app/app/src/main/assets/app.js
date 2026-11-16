@@ -1485,9 +1485,9 @@ notify pgrst, 'reload schema';`;
     const locationText = [address, island, coords ? coords[0].toFixed(6) + ', ' + coords[1].toFixed(6) : ''].filter(Boolean).join(' · ');
     const note = coords ? 'Punto guardado en la ficha.' : island ? 'Mapa centrado en ' + island + '. Guarda las coordenadas para fijar el punto exacto.' : 'Completa la dirección o la isla para localizar el sitio.';
     const leadTargets = isLead ? leadLocationTargets(item) : null;
-    const leadSyncAction = isLead && leadTargets && leadTargets.related.length && [item.island, item.address, item.latitude, item.longitude].some(value => value != null && value !== '')
-      ? '<button type="button" class="btn btn-sm" data-action="sync-lead-location" data-id="' + esc(item.id) + '">Copiar ubicación a cliente y obras</button>' : '';
-    const leadSyncNote = isLead && leadTargets && leadTargets.related.length ? ' Puedes copiar ahora esta ubicación al cliente y a sus obras vinculadas desde el botón anterior.' : '';
+    const leadSyncAction = isLead && leadTargets && leadTargets.related.length && Object.values(leadClientValues(item)).some(value => value != null && value !== '')
+      ? '<button type="button" class="btn btn-sm" data-action="sync-lead-location" data-id="' + esc(item.id) + '">Sincronizar datos con cliente y obras</button>' : '';
+    const leadSyncNote = isLead && leadTargets && leadTargets.related.length ? ' Los cambios del lead se copian automáticamente a las fichas vinculadas; puedes forzar la sincronización con este botón.' : '';
     return '<section class="location-panel"><div class="location-panel-head"><div><p class="eyebrow">UBICACIÓN Y CONTACTO</p><h3>' + esc(destination) + '</h3><p>' + esc(locationText || note) + '</p></div>' + (client ? '<span class="badge">' + esc(client.company || client.name || 'Cliente') + '</span>' : '') + '</div>' + mapActions + (leadSyncAction ? '<div class="location-actions location-sync-actions">' + leadSyncAction + '</div>' : '') + '<iframe class="grafcan-frame" src="' + esc(grafcanViewerUrl(mapRecord, island)) + '" title="Mapa de GRAFCAN · ' + esc(destination) + '" loading="lazy" referrerpolicy="strict-origin-when-cross-origin" allowfullscreen></iframe><p class="location-note">' + esc(note) + ' Los enlaces de ruta y aviso se abren en la aplicación correspondiente; el WhatsApp queda preparado para que lo revises y lo envíes.' + esc(leadSyncNote) + '</p></section>';
   }
 
@@ -2435,6 +2435,15 @@ notify pgrst, 'reload schema';`;
       const input = $('[name="' + name + '"]', $('#entity-form'));
       if (input && preset[name] != null && preset[name] !== '') input.dataset.inherited = 'true';
     });
+    if (old && ['work', 'event'].includes(type)) {
+      const linkedWork = type === 'event' ? data.works.find(work => work.id === old.workId) : null;
+      const linkedClient = data.clients.find(client => client.id === (type === 'work' ? old.clientId : old.clientId || (linkedWork && linkedWork.clientId)));
+      const source = type === 'work' ? linkedClient : linkedWork || linkedClient;
+      if (source) ['island', 'address', 'latitude', 'longitude'].forEach(name => {
+        const input = $('[name="' + name + '"]', $('#entity-form'));
+        if (input && sameLinkedValue(name, old[name], source[name])) input.dataset.inherited = 'true';
+      });
+    }
     if (hasDetailedLines) updateQuoteTotals($('#entity-form'));
     if (type === 'quote') {
       const quoteForm = $('#entity-form');
@@ -2467,6 +2476,180 @@ notify pgrst, 'reload schema';`;
     }
     return String(left == null ? '' : left).trim() === String(right == null ? '' : right).trim();
   }
+  function sameLinkedValue(field, left, right) {
+    const leftBlank = left == null || left === '';
+    const rightBlank = right == null || right === '';
+    if (leftBlank || rightBlank) return leftBlank === rightBlank;
+    if (['budget', 'value', 'amount', 'taxRate', 'progress', 'probability'].includes(field)) {
+      const leftNumber = parsedNumber(left);
+      const rightNumber = parsedNumber(right);
+      return leftNumber != null && rightNumber != null && leftNumber === rightNumber;
+    }
+    if ((Array.isArray(left) || Array.isArray(right) || (typeof left === 'object' && typeof right === 'object')) && left && right) {
+      try { return JSON.stringify(left) === JSON.stringify(right); } catch (_) { return false; }
+    }
+    return sameLocationValue(field, left, right);
+  }
+  function syncLinkedFields(target, previousValues, nextValues, time, force) {
+    if (!target || !nextValues) return false;
+    let changed = false;
+    Object.keys(nextValues).forEach(field => {
+      const nextValue = nextValues[field] == null ? '' : nextValues[field];
+      const previousValue = previousValues && previousValues[field] != null ? previousValues[field] : '';
+      const currentValue = target[field] == null ? '' : target[field];
+      if (force) {
+        if (nextValue === '') return;
+      } else if (currentValue !== '' && !sameLinkedValue(field, currentValue, previousValue)) return;
+      if (sameLinkedValue(field, currentValue, nextValue)) return;
+      target[field] = Array.isArray(nextValue) || (nextValue && typeof nextValue === 'object') ? clone(nextValue) : nextValue;
+      changed = true;
+    });
+    if (changed) target.updatedAt = time;
+    return changed;
+  }
+  function syncChangedFields(target, previousValues, nextValues, time) {
+    if (!target || !nextValues) return false;
+    let changed = false;
+    Object.keys(nextValues).forEach(field => {
+      const previousValue = previousValues && previousValues[field] != null ? previousValues[field] : '';
+      const nextValue = nextValues[field] == null ? '' : nextValues[field];
+      const currentValue = target[field] == null ? '' : target[field];
+      if (sameLinkedValue(field, previousValue, nextValue) || sameLinkedValue(field, currentValue, nextValue)) return;
+      target[field] = Array.isArray(nextValue) || (nextValue && typeof nextValue === 'object') ? clone(nextValue) : nextValue;
+      changed = true;
+    });
+    if (changed) target.updatedAt = time;
+    return changed;
+  }
+  function locationValues(record) {
+    const item = record || {};
+    return { island: item.island || '', address: item.address || '', latitude: item.latitude == null ? '' : item.latitude, longitude: item.longitude == null ? '' : item.longitude };
+  }
+  function leadClientValues(lead) {
+    const item = lead || {};
+    return { name: item.name || '', company: item.company || item.name || '', phone: item.phone || '', email: item.email || '', island: item.island || '', address: item.address || '', latitude: item.latitude == null ? '' : item.latitude, longitude: item.longitude == null ? '' : item.longitude, notes: item.notes || '' };
+  }
+  function clientLeadValues(client) {
+    const item = client || {};
+    return { name: item.name || '', company: item.company || '', phone: item.phone || '', email: item.email || '', island: item.island || '', address: item.address || '', latitude: item.latitude == null ? '' : item.latitude, longitude: item.longitude == null ? '' : item.longitude, notes: item.notes || '' };
+  }
+  function syncGeneratedValue(record, field, replacements, time) {
+    if (!record) return false;
+    const current = String(record[field] == null ? '' : record[field]);
+    const replacement = (replacements || []).find(pair => pair[0] && pair[0] !== pair[1] && current === pair[0]);
+    if (!replacement) return false;
+    record[field] = replacement[1];
+    record.updatedAt = time;
+    return true;
+  }
+  function syncDraftInvoiceTitle(quoteId, previousTitle, nextTitle, time) {
+    if (!quoteId || !previousTitle || previousTitle === nextTitle) return false;
+    let changed = false;
+    data.invoices.filter(item => item.sourceQuoteId === quoteId && item.status === 'Borrador' && item.title === previousTitle).forEach(invoice => {
+      invoice.title = nextTitle;
+      invoice.updatedAt = time;
+      changed = true;
+    });
+    return changed;
+  }
+  function syncWorkGeneratedTitles(work, previousName, time) {
+    if (!work || !previousName || previousName === work.name) return false;
+    let changed = false;
+    const rules = [
+      ['tasks', 'Trabajo · '], ['quotes', 'Presupuesto · '], ['events', 'Visita de obra · '],
+      ['documents', 'Documento · '], ['expenses', 'Gasto de obra · ']
+    ];
+    rules.forEach(([collection, prefix]) => {
+      data[collection].filter(item => item.workId === work.id && (collection !== 'quotes' || item.status === 'Borrador')).forEach(item => {
+        const oldTitle = item.title;
+        if (syncGeneratedValue(item, 'title', [[prefix + previousName, prefix + work.name]], time)) {
+          changed = true;
+          if (collection === 'quotes') changed = syncDraftInvoiceTitle(item.id, oldTitle, item.title, time) || changed;
+        }
+      });
+    });
+    return changed;
+  }
+  function syncClientGeneratedTitles(client, previous, time) {
+    if (!client || !previous) return false;
+    const oldLabel = previous.company || previous.name || '';
+    const nextLabel = client.company || client.name || '';
+    let changed = false;
+    const rules = [['tasks', 'Tarea · '], ['quotes', 'Presupuesto · '], ['events', 'Cita · ']];
+    rules.forEach(([collection, prefix]) => {
+      data[collection].filter(item => item.clientId === client.id && !item.workId && (collection !== 'quotes' || item.status === 'Borrador')).forEach(item => {
+        const oldTitle = item.title;
+        if (syncGeneratedValue(item, 'title', [[prefix + oldLabel, prefix + nextLabel]], time)) {
+          changed = true;
+          if (collection === 'quotes') changed = syncDraftInvoiceTitle(item.id, oldTitle, item.title, time) || changed;
+        }
+      });
+    });
+    return changed;
+  }
+  function syncClientDefaultWorkName(work, previousClient, client, time) {
+    const oldLabel = previousClient.company || previousClient.name || '';
+    const nextLabel = client.company || client.name || '';
+    return syncGeneratedValue(work, 'name', [
+      ['Obra · ' + oldLabel, 'Obra · ' + nextLabel],
+      ['Nueva obra · ' + (previousClient.name || ''), 'Nueva obra · ' + (client.name || '')]
+    ], time);
+  }
+  function syncLeadDefaultWorkName(work, previousLead, lead, time) {
+    const oldLabel = previousLead.company || previousLead.name || '';
+    const nextLabel = lead.company || lead.name || '';
+    return syncGeneratedValue(work, 'name', [
+      ['Obra · ' + oldLabel, 'Obra · ' + nextLabel],
+      ['Nueva obra · ' + (previousLead.name || ''), 'Nueva obra · ' + (lead.name || '')]
+    ], time);
+  }
+  function syncWorkRelatedData(work, previous, time) {
+    if (!work || !previous) return false;
+    let changed = false;
+    if (work.name !== previous.name) changed = syncWorkGeneratedTitles(work, previous.name || '', time) || changed;
+    data.events.filter(item => item.workId === work.id).forEach(event => {
+      changed = syncLinkedFields(event, locationValues(previous), locationValues(work), time, false) || changed;
+    });
+    const oldClientId = previous.clientId || '';
+    const nextClientId = work.clientId || '';
+    if (oldClientId && oldClientId === nextClientId) {
+      const previousLocation = locationValues(previous);
+      const nextLocation = locationValues(work);
+      const changedLocation = {};
+      Object.keys(nextLocation).forEach(field => {
+        if (!sameLinkedValue(field, previousLocation[field], nextLocation[field])) changedLocation[field] = nextLocation[field];
+      });
+      const client = data.clients.find(item => item.id === nextClientId);
+      if (client && Object.keys(changedLocation).length) {
+        const previousClient = clone(client);
+        if (syncLinkedFields(client, previousLocation, changedLocation, time, false)) {
+          changed = true;
+          changed = syncClientRelatedData(client, previousClient, time) || changed;
+        }
+      }
+    }
+    if (oldClientId !== nextClientId) {
+      const previousClient = data.clients.find(item => item.id === oldClientId);
+      const nextClient = data.clients.find(item => item.id === nextClientId);
+      if (previousClient && nextClient) {
+        const previousName = work.name;
+        changed = syncClientDefaultWorkName(work, previousClient, nextClient, time) || changed;
+        if (work.name !== previousName) changed = syncWorkGeneratedTitles(work, previousName, time) || changed;
+      }
+      ['tasks', 'events', 'documents', 'expenses', 'quotes', 'invoices'].forEach(collection => {
+        data[collection].filter(item => item.workId === work.id).forEach(item => {
+          if (['quotes', 'invoices'].includes(collection) && item.status !== 'Borrador') return;
+          const itemClientId = item.clientId || '';
+          if (itemClientId !== '' && itemClientId !== oldClientId) return;
+          if (itemClientId === nextClientId) return;
+          item.clientId = nextClientId;
+          item.updatedAt = time;
+          changed = true;
+        });
+      });
+    }
+    return changed;
+  }
   function leadLocationTargets(lead) {
     if (!lead) return { client: null, works: [], related: [] };
     const client = data.clients.find(item => item.id === lead.clientId) || data.clients.find(item => item.sourceLeadId === lead.id) || null;
@@ -2474,35 +2657,89 @@ notify pgrst, 'reload schema';`;
     const related = (client ? [client] : []).concat(works);
     return { client, works, related: Array.from(new Map(related.map(item => [item.id, item])).values()) };
   }
-  function syncLeadLocation(lead, previous, time, force) {
+  function syncLeadRelatedData(lead, previous, time, force) {
     if (!lead || (!previous && !force)) return 0;
-    const related = leadLocationTargets(lead).related;
-    let changedRecords = 0;
-    related.forEach(record => {
-      let changed = false;
-      ['island', 'address', 'latitude', 'longitude'].forEach(field => {
-        const recordIsBlank = record[field] == null || record[field] === '';
-        const nextValue = lead[field] == null ? '' : lead[field];
-        if (force) {
-          if (nextValue === '') return;
-        } else if (!recordIsBlank && !sameLocationValue(field, record[field], previous[field])) return;
-        if (sameLocationValue(field, record[field], nextValue)) return;
-        record[field] = nextValue;
-        changed = true;
+    const targets = leadLocationTargets(lead);
+    let changed = false;
+    let previousClient = null;
+    if (targets.client) {
+      previousClient = clone(targets.client);
+      changed = previous
+        ? syncChangedFields(targets.client, leadClientValues(previous), leadClientValues(lead), time) || changed
+        : syncLinkedFields(targets.client, leadClientValues(null), leadClientValues(lead), time, force) || changed;
+      changed = syncClientGeneratedTitles(targets.client, previousClient, time) || changed;
+      data.events.filter(event => event.clientId === targets.client.id && !event.workId).forEach(event => {
+        changed = syncLinkedFields(event, locationValues(previousClient), locationValues(targets.client), time, force) || changed;
       });
-      if (changed) { record.updatedAt = time; changedRecords++; }
+    }
+    targets.works.forEach(work => {
+      const previousWork = clone(work);
+      const previousValues = Object.assign({}, locationValues(previous), { budget: num(previous && previous.value) });
+      const nextValues = Object.assign({}, locationValues(lead), { budget: num(lead.value) });
+      if (work.budgetSourceQuoteId || (force && !num(lead.value))) { delete previousValues.budget; delete nextValues.budget; }
+      changed = syncLinkedFields(work, previousValues, nextValues, time, force) || changed;
+      if (previous) changed = syncLeadDefaultWorkName(work, previous, lead, time) || changed;
+      changed = syncWorkRelatedData(work, previousWork, time) || changed;
     });
-    return changedRecords;
+    return changed;
   }
   function syncLeadLocationNow(id) {
     const lead = data.leads.find(item => item.id === id);
     if (!lead) return;
     const targets = leadLocationTargets(lead);
     if (!targets.related.length) return toast('Este lead aún no está vinculado a un cliente u obra.', 'bad');
-    let changed = 0;
-    if (!commitChange(() => { changed = syncLeadLocation(lead, null, nowIso(), true); })) return;
+    let changed = false;
+    if (!commitChange(() => { changed = syncLeadRelatedData(lead, null, nowIso(), true); })) return;
     renderDetail('lead', id);
-    toast(changed ? 'Ubicación copiada a ' + changed + (changed === 1 ? ' ficha vinculada.' : ' fichas vinculadas.') : 'El cliente y las obras ya tenían esta ubicación.', 'good');
+    toast(changed ? 'Datos del lead sincronizados con el cliente y las obras.' : 'El cliente y las obras ya tenían estos datos.', 'good');
+  }
+  function syncClientRelatedData(client, previous, time) {
+    if (!client || !previous) return false;
+    let changed = false;
+    data.leads.filter(lead => lead.id === client.sourceLeadId || lead.clientId === client.id).forEach(lead => {
+      changed = syncChangedFields(lead, clientLeadValues(previous), clientLeadValues(client), time) || changed;
+    });
+    const previousLocation = locationValues(previous);
+    const nextLocation = locationValues(client);
+    data.works.filter(work => work.clientId === client.id).forEach(work => {
+      const previousWork = clone(work);
+      changed = syncLinkedFields(work, previousLocation, nextLocation, time, false) || changed;
+      changed = syncClientDefaultWorkName(work, previous, client, time) || changed;
+      changed = syncWorkRelatedData(work, previousWork, time) || changed;
+    });
+    data.events.filter(event => event.clientId === client.id && !event.workId).forEach(event => {
+      changed = syncLinkedFields(event, previousLocation, nextLocation, time, false) || changed;
+    });
+    changed = syncClientGeneratedTitles(client, previous, time) || changed;
+    return changed;
+  }
+  function syncQuoteRelatedData(quote, previous, time) {
+    if (!quote || !previous) return false;
+    let changed = false;
+    const sharedFields = ['title', 'clientId', 'workId', 'amount', 'taxRate', 'taxName', 'items'];
+    const previousValues = {};
+    const nextValues = {};
+    sharedFields.forEach(field => { previousValues[field] = previous[field]; nextValues[field] = quote[field]; });
+    data.invoices.filter(invoice => invoice.sourceQuoteId === quote.id && invoice.status === 'Borrador').forEach(invoice => {
+      changed = syncLinkedFields(invoice, previousValues, nextValues, time, false) || changed;
+    });
+    if (quote.status === 'Aceptada' && quote.workId) {
+      const work = data.works.find(item => item.id === quote.workId);
+      if (work) {
+        const previousAmount = previous.amount == null ? '' : previous.amount;
+        const budgetFollowsQuote = work.budgetSourceQuoteId === quote.id || work.budget == null || work.budget === '' || sameLinkedValue('budget', work.budget, previousAmount);
+        if (budgetFollowsQuote) {
+          const nextBudget = num(quote.amount);
+          if (!sameLinkedValue('budget', work.budget, nextBudget) || work.budgetSourceQuoteId !== quote.id) {
+            work.budget = nextBudget;
+            work.budgetSourceQuoteId = quote.id;
+            work.updatedAt = time;
+            changed = true;
+          }
+        }
+      }
+    }
+    return changed;
   }
   function saveEntity(form) {
     const type = form.dataset.type;
@@ -2529,21 +2766,37 @@ notify pgrst, 'reload schema';`;
     if (['quote', 'invoice'].includes(type) && !form.dataset.id) values.taxName = data.company.taxName || 'IGIC';
     if (type === 'invoice' && values.status === 'Pagada') values.status = 'Emitida';
     if (type === 'lead' && values.probability === 0) values.probability = defaultProbability(values.stage);
+    if (['task', 'quote', 'invoice', 'event', 'document'].includes(type) && values.workId) {
+      const linkedWork = data.works.find(item => item.id === values.workId);
+      if (linkedWork) values.clientId = linkedWork.clientId || '';
+    }
     const id = form.dataset.id;
     const savedId = id || uid();
     const time = nowIso();
     const index = id ? data[collection].findIndex(x => x.id === id) : -1;
     if (id && index < 0) { toast('No se encontró el registro. Actualiza la lista e inténtalo de nuevo.', 'bad'); return; }
-    const previousLead = type === 'lead' && id ? data.leads[index] : null;
+    const previousRecord = id ? clone(data[collection][index]) : null;
+    if (previousRecord && ['lead', 'client', 'work', 'event'].includes(type)
+      && (!sameLocationValue('address', previousRecord.address, values.address) || !sameLocationValue('island', previousRecord.island, values.island))) {
+      ['latitude', 'longitude'].forEach(field => {
+        if (sameLocationValue(field, previousRecord[field], values[field])) values[field] = '';
+      });
+    }
     if (type === 'work' && !id) {
       const client = data.clients.find(item => item.id === values.clientId);
       if (client && client.sourceLeadId) values.sourceLeadId = client.sourceLeadId;
     }
-    let syncedLocationRecords = 0;
+    let linkedDataUpdated = false;
     if (!commitChange(() => {
       if (id) {
         data[collection][index] = Object.assign({}, data[collection][index], values, { updatedAt: time });
-        if (type === 'lead') syncedLocationRecords = syncLeadLocation(data.leads[index], previousLead, time);
+        if (type === 'lead') linkedDataUpdated = syncLeadRelatedData(data.leads[index], previousRecord, time, false) || linkedDataUpdated;
+        if (type === 'client') linkedDataUpdated = syncClientRelatedData(data.clients[index], previousRecord, time) || linkedDataUpdated;
+        if (type === 'work') {
+          if (!sameLinkedValue('budget', previousRecord.budget, data.works[index].budget)) data.works[index].budgetSourceQuoteId = '';
+          linkedDataUpdated = syncWorkRelatedData(data.works[index], previousRecord, time) || linkedDataUpdated;
+        }
+        if (type === 'quote') linkedDataUpdated = syncQuoteRelatedData(data.quotes[index], previousRecord, time) || linkedDataUpdated;
       }
       else data[collection].unshift(Object.assign({ id: savedId, createdAt: time, updatedAt: time }, values));
     })) return;
@@ -2552,7 +2805,7 @@ notify pgrst, 'reload schema';`;
     if (type === 'team') settingsTab = 'equipo';
     setView(destination);
     renderDetail(type, savedId);
-    toast((id ? 'Cambios guardados' : 'Registro creado') + ' correctamente.' + (syncedLocationRecords ? ' Ubicación actualizada también en ' + syncedLocationRecords + (syncedLocationRecords === 1 ? ' ficha relacionada.' : ' fichas relacionadas.') : ''), 'good');
+    toast((id ? 'Cambios guardados' : 'Registro creado') + ' correctamente.' + (linkedDataUpdated ? ' Los datos relacionados también se actualizaron.' : ''), 'good');
   }
 
   function removeEntity(type, id) {
@@ -2673,16 +2926,16 @@ notify pgrst, 'reload schema';`;
 
   function inheritSiteFields(form, changedName) {
     const type = form.dataset.type;
-    if (!['work', 'event'].includes(type)) return;
+    if (!['work', 'task', 'quote', 'invoice', 'event', 'document'].includes(type)) return;
     const clientSelect = $('[name="clientId"]', form);
     const workSelect = $('[name="workId"]', form);
     let relatedWork = workSelect && workSelect.value ? data.works.find(item => item.id === workSelect.value) : null;
-    if (type === 'event' && changedName === 'clientId' && relatedWork && relatedWork.clientId !== (clientSelect && clientSelect.value)) {
+    if (changedName === 'clientId' && relatedWork && relatedWork.clientId !== (clientSelect && clientSelect.value)) {
       workSelect.value = '';
       workSelect.dataset.inherited = 'true';
       relatedWork = null;
     }
-    if (type === 'event' && changedName === 'workId' && relatedWork && clientSelect) {
+    if (changedName === 'workId' && relatedWork && clientSelect) {
       clientSelect.value = relatedWork.clientId || '';
       clientSelect.dataset.inherited = 'true';
     }
@@ -2702,6 +2955,7 @@ notify pgrst, 'reload schema';`;
   function quoteToInvoice(id) {
     const q = data.quotes.find(x => x.id === id);
     if (!q) return;
+    const previousQuote = clone(q);
     const time = nowIso();
     const invoice = { id: uid(), title: q.title, number: '', clientId: q.clientId, workId: q.workId, date: today, due: '', amount: num(q.amount), items: Array.isArray(q.items) ? clone(q.items) : [], taxName: q.taxName || data.company.taxName || 'IGIC', taxRate: num(q.taxRate), status: 'Borrador', notes: q.notes || 'Creada desde presupuesto ' + (q.number || q.title), createdAt: time, updatedAt: time, sourceQuoteId: q.id };
     if (!commitChange(() => {
@@ -2709,6 +2963,7 @@ notify pgrst, 'reload schema';`;
       const currentQuote = data.quotes.find(x => x.id === id);
       currentQuote.status = 'Aceptada';
       currentQuote.updatedAt = time;
+      syncQuoteRelatedData(currentQuote, previousQuote, time);
     })) return;
     $('#modal-root').innerHTML = '';
     setView('finance');
@@ -3175,7 +3430,16 @@ notify pgrst, 'reload schema';`;
       if (input) { input.focus(); input.setSelectionRange(caret, caret); }
     }
     if (event.target.matches('[data-quote-field="unit"]')) event.target.dataset.autoUnit = 'false';
-    if (event.target.form && event.target.form.id === 'entity-form' && ['address', 'latitude', 'longitude'].includes(event.target.name)) event.target.dataset.inherited = 'false';
+    if (event.target.form && event.target.form.id === 'entity-form' && ['address', 'latitude', 'longitude'].includes(event.target.name)) {
+      event.target.dataset.inherited = 'false';
+      if (event.target.name === 'address') ['latitude', 'longitude'].forEach(name => {
+        const coordinate = $('[name="' + name + '"]', event.target.form);
+        if (coordinate && coordinate.dataset.inherited === 'true') {
+          coordinate.value = '';
+          coordinate.dataset.inherited = 'false';
+        }
+      });
+    }
     if (event.target.form && event.target.form.id === 'entity-form' && $('[data-quote-line-list]', event.target.form)) updateQuoteTotals(event.target.form);
   });
   document.addEventListener('change', (event) => {
@@ -3198,7 +3462,16 @@ notify pgrst, 'reload schema';`;
     if (event.target.id === 'filter-select') { filterValue = event.target.value; render(); }
     if (event.target.id === 'island-filter') { islandFilter = event.target.value || 'all'; render(); }
     if (event.target.dataset.moveType) { moveRecord(event.target.dataset.moveType, event.target.dataset.id, event.target.value); return; }
-    if (event.target.form && event.target.form.id === 'entity-form' && event.target.name === 'island') event.target.dataset.inherited = 'false';
+    if (event.target.form && event.target.form.id === 'entity-form' && event.target.name === 'island') {
+      event.target.dataset.inherited = 'false';
+      ['latitude', 'longitude'].forEach(name => {
+        const coordinate = $('[name="' + name + '"]', event.target.form);
+        if (coordinate && coordinate.dataset.inherited === 'true') {
+          coordinate.value = '';
+          coordinate.dataset.inherited = 'false';
+        }
+      });
+    }
     if (event.target.form && event.target.form.id === 'entity-form' && event.target.name === 'workId') {
       const powerInput = $('[data-solar-bundle-power]', event.target.form);
       if (powerInput && powerInput.dataset.userSet !== 'true') powerInput.value = quotePowerForWork(event.target.value) || 5;

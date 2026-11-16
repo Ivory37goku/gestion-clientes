@@ -26,13 +26,14 @@ Las capturas usan datos ficticios para enseñar la interfaz.
 
 - Embudo de leads con seguimiento, responsables, valor estimado e historial de llamadas, visitas, correos, WhatsApp y notas.
 - Conversión guiada de lead a cliente y, si procede, creación de su primera obra vinculada.
-- Fichas relacionadas de clientes, obras, presupuestos, facturas, documentos y tareas.
+- Fichas relacionadas de clientes, obras, presupuestos, facturas, documentos y tareas. Los cambios de contacto se propagan entre lead y cliente; las ubicaciones heredadas actualizan las obras y citas vinculadas, y los nombres generados se ajustan sin pisar títulos personalizados ni presupuestos aceptados.
+- Al asociar una tarea, cita, documento o presupuesto a una obra, la app mantiene también el cliente correcto. Los cambios se guardan en el dispositivo y entran en la sincronización privada existente.
 - Búsqueda global, filtros por isla y vistas de lista y tablero Kanban con movimiento de tarjetas.
 
 ### Obras y equipo
 
 - Obras con estado, fechas, avance, responsable, presupuesto y ubicación.
-- Dirección, isla y coordenadas heredadas entre el lead, el cliente y la obra para reducir la entrada repetida de datos.
+- Dirección, isla y coordenadas heredadas entre el lead, el cliente y la obra para reducir la entrada repetida de datos. Si cambia la dirección o la isla, se descartan coordenadas antiguas no sustituidas para que el mapa y PVGIS localicen el sitio actualizado.
 - Tareas, visitas, agenda, incidencias, mantenimiento y checklists conectados al trabajo.
 - Acceso a la dirección y acciones rápidas para contactar al cliente.
 
@@ -60,7 +61,7 @@ La paleta, el icono y el logo están a mano en **Administración → Marca** (ta
 | Plataforma | Descarga o acceso |
 | --- | --- |
 | Web / PWA | [Abrir Gestión Clientes](https://ivory37goku.github.io/gestion-clientes/) |
-| Android | [Descargar APK 1.0.20](https://raw.githubusercontent.com/Ivory37goku/gestion-clientes/main/downloads/gestion-clientes-1.0.20.apk) |
+| Android | [Descargar APK 1.0.21](https://raw.githubusercontent.com/Ivory37goku/gestion-clientes/main/downloads/gestion-clientes-1.0.21.apk) |
 | Windows | [Abrir las compilaciones de Windows](https://github.com/Ivory37goku/gestion-clientes/actions/workflows/windows.yml) |
 
 En Android, descarga el APK e instálalo desde el dispositivo. En Windows, abre la última ejecución correcta del workflow y descarga el artefacto `gestion-clientes-windows`, que contiene el instalador y la versión portable. La PWA también se puede añadir a la pantalla de inicio desde el navegador.
