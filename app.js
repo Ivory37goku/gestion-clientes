@@ -996,7 +996,19 @@ notify pgrst, 'reload schema';`;
       const max = Math.max(1, ...STATUS.lead.slice(0, 4).map(s => openLeads.filter(l => l.stage === s).length));
       return '<div class="pipe-step"><div class="pipe-label">' + esc(stage) + '</div><div class="pipe-value">' + subset.length + '</div><div class="pipe-bar"><i style="width:' + Math.round(subset.length / max * 100) + '%"></i></div></div>';
     }).join('');
-    const setup = !data.company.name ? '<section class="setup-card"><h2>Deja lista tu empresa</h2><p>Completa los datos básicos y añade tu primer contacto para empezar.</p><div class="setup-steps"><span class="setup-step">1. Configura la empresa</span><span class="setup-step">2. Añade un lead o cliente</span><span class="setup-step">3. Crea una obra y sus tareas</span></div><div style="margin-top:11px">' + btn('Configurar empresa', 'settings-tab', 'btn-primary', ' data-tab="empresa"') + '</div></section>' : '';
+    const onboarding = CORE.onboardingChecklist(data.company, data.leads, data.clients, data.works);
+    const nextSetupStep = onboarding.nextStep;
+    const setupCopy = {
+      company: ['Completa los datos de tu empresa', 'Añade la información de empresa para personalizar presupuestos y facturas.'],
+      contact: ['Empieza con un contacto', 'Registra un lead o cliente para organizar sus obras, visitas y presupuestos.'],
+      work: ['Organiza tu primera obra', 'Crea una obra para planificar sus tareas, visitas y fechas de ejecución.']
+    };
+    const setupActions = nextSetupStep === 'company'
+      ? btn('Configurar empresa', 'settings-tab', 'btn-primary', ' data-tab="empresa"')
+      : nextSetupStep === 'contact'
+        ? newBtn('lead', 'Crear lead') + btn('＋ Nuevo cliente', 'new', '', ' data-type="client"')
+        : nextSetupStep === 'work' ? newBtn('work', 'Crear obra') : '';
+    const setup = nextSetupStep ? '<section class="setup-card" aria-label="Puesta en marcha"><div class="setup-copy"><p class="eyebrow">INICIO RÁPIDO · ' + onboarding.completed + ' DE ' + onboarding.total + ' PASOS</p><h2>' + esc(setupCopy[nextSetupStep][0]) + '</h2><p>' + esc(setupCopy[nextSetupStep][1]) + '</p></div><div class="setup-steps" role="list">' + onboarding.steps.map((step, index) => '<span class="setup-step" role="listitem" data-state="' + (step.complete ? 'complete' : step.id === nextSetupStep ? 'next' : 'pending') + '"><span class="setup-step-mark" aria-hidden="true">' + (step.complete ? '✓' : String(index + 1)) + '</span>' + esc(step.label) + '</span>').join('') + '</div><div class="setup-actions">' + setupActions + '</div></section>' : '';
     const hero = '<section class="hero dashboard-hero"><div class="hero-main"><p class="eyebrow">PANEL DE CONTROL · ' + esc(new Date().toLocaleDateString('es-ES', { weekday: 'long', day: 'numeric', month: 'long' })) + '</p><h1>' + (data.company.name ? 'Bienvenido, <span>' + esc(data.company.owner || data.company.name) + '</span>' : 'Tu negocio, <span>bajo control.</span>') + '</h1><p>Clientes, obras y equipo en un mismo sitio. Aquí tienes lo que requiere atención y el estado actual del negocio.</p></div>' + dashboardFocus() + '<div class="hero-actions">' + newBtn('lead', 'Nuevo lead') + newBtn('client', 'Nuevo cliente') + newBtn('work', 'Nueva obra') + newBtn('quote', 'Nuevo presupuesto') + '</div></section>';
     const kpis = '<div class="kpis">' +
       kpi('Oportunidades abiertas', openLeads.length, money(weighted) + ' valor ponderado', '✳') +
@@ -2386,6 +2398,17 @@ notify pgrst, 'reload schema';`;
     return '<div class="field ' + (size || '') + '"><label for="' + id + '">' + esc(label) + '</label>' + control + '</div>';
   }
 
+  function formFieldsMarkup(type, item, specs) {
+    const fields = Array.isArray(specs) ? specs : FIELDS[type] || [];
+    const coordinates = fields.filter(spec => ['latitude', 'longitude'].includes(spec[0]));
+    const standard = fields.filter(spec => !['latitude', 'longitude'].includes(spec[0]));
+    const markup = '<div class="fields">' + standard.map(spec => fieldMarkup(spec, item[spec[0]])).join('') + '</div>';
+    if (!coordinates.length) return markup;
+    const hasCoordinates = coordinates.some(spec => item[spec[0]] != null && item[spec[0]] !== '');
+    const title = hasCoordinates ? 'Coordenadas guardadas · ajustar manualmente' : 'Ajustar ubicación manualmente (opcional)';
+    return markup + '<details class="manual-coordinates"><summary>' + title + '</summary><p class="hint">La dirección se intenta localizar automáticamente. Rellena estas coordenadas solo si necesitas fijar con precisión el punto del mapa.</p><div class="fields">' + coordinates.map(spec => fieldMarkup(spec, item[spec[0]])).join('') + '</div></details>';
+  }
+
   function quoteDefaultUnit(category) {
     return ({ 'Mano de obra': 'horas', 'Desplazamiento': 'trayecto', 'Material': 'ud', 'Otros': 'ud' })[category] || 'ud';
   }
@@ -2677,8 +2700,8 @@ notify pgrst, 'reload schema';`;
     if (type === 'quote') item.items = quoteItemsForForm(item);
     const hasDetailedLines = type === 'quote' || (type === 'invoice' && Array.isArray(item.items) && item.items.length > 0);
     const fieldContent = hasDetailedLines
-      ? '<div class="fields">' + FIELDS[type].filter(s => !['amount', 'notes'].includes(s[0])).map(s => fieldMarkup(s, item[s[0]])).join('') + '</div>' + quoteEditorMarkup(item.items, type === 'quote', item.workId) + '<div class="fields">' + fieldMarkup(FIELDS[type].find(s => s[0] === 'notes'), item.notes) + '</div>'
-      : '<div class="fields">' + FIELDS[type].map(s => fieldMarkup(s, item[s[0]])).join('') + '</div>';
+      ? formFieldsMarkup(type, item, FIELDS[type].filter(s => !['amount', 'notes'].includes(s[0]))) + quoteEditorMarkup(item.items, type === 'quote', item.workId) + formFieldsMarkup(type, item, FIELDS[type].filter(s => s[0] === 'notes'))
+      : formFieldsMarkup(type, item, FIELDS[type]);
     const title = id ? 'Editar ' + TYPE_LABEL[type] : TYPE_TITLE[type];
     const form = '<div class="modal-backdrop" data-action="backdrop"><section class="modal" role="dialog" aria-modal="true" aria-labelledby="form-title"><div class="modal-head"><h2 id="form-title">' + esc(title) + '</h2><button class="close-btn" data-action="close-modal" aria-label="Cerrar">×</button></div><form id="entity-form" data-type="' + type + '" data-id="' + esc(id || '') + '"><div class="modal-body"><p class="modal-note">Los campos marcados son necesarios para guardar el registro.</p>' + fieldContent + '</div><div class="modal-foot"><div>' + (id ? '<button type="button" class="btn btn-danger btn-sm" data-action="delete" data-type="' + type + '" data-id="' + esc(id) + '">Eliminar</button>' : '') + '</div><div><button type="button" class="btn" data-action="close-modal">Cancelar</button><button type="submit" class="btn btn-primary">Guardar</button></div></div></form></section></div>';
     $('#modal-root').innerHTML = form;

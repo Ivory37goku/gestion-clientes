@@ -8,6 +8,19 @@
   const COLLECTIONS = ['leads', 'clients', 'works', 'tasks', 'quotes', 'invoices', 'payments', 'expenses', 'events', 'documents', 'team'];
   const REQUIRED_BACKUP_COLLECTIONS = ['leads', 'clients', 'works', 'tasks', 'quotes', 'invoices'];
 
+  function onboardingChecklist(company, leads, clients, works) {
+    const companyName = company && typeof company.name === 'string' ? company.name.trim() : '';
+    const hasContact = (Array.isArray(leads) && leads.length > 0) || (Array.isArray(clients) && clients.length > 0);
+    const hasWork = Array.isArray(works) && works.length > 0;
+    const steps = [
+      { id: 'company', label: 'Configura los datos de tu empresa', complete: !!companyName },
+      { id: 'contact', label: 'Registra un lead o cliente', complete: hasContact },
+      { id: 'work', label: 'Crea tu primera obra', complete: hasWork }
+    ];
+    const completed = steps.filter(step => step.complete).length;
+    return { steps, completed, total: steps.length, nextStep: steps.find(step => !step.complete)?.id || null };
+  }
+
   function inspectBackup(value) {
     const wrapped = value && typeof value === 'object' && !Array.isArray(value)
       && value.app === 'Gestión Clientes' && value.data && typeof value.data === 'object';
@@ -148,5 +161,5 @@
     return { unitCost: Math.round((net + Number.EPSILON) * 100) / 100, taxRateApplied: includesTax ? taxRate : 0, includesTax };
   }
 
-  return { COLLECTIONS, inspectBackup, monthEndKey, fingerprint, makeSyncSnapshot, findSyncConflicts, findUnbasedConflicts, financialMetrics, normalizeSupplierCost };
+  return { COLLECTIONS, onboardingChecklist, inspectBackup, monthEndKey, fingerprint, makeSyncSnapshot, findSyncConflicts, findUnbasedConflicts, financialMetrics, normalizeSupplierCost };
 });

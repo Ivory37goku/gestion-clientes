@@ -66,12 +66,18 @@ La paleta, el icono y el logo están a mano en **Administración → Marca** (ta
 | Plataforma | Descarga o acceso |
 | --- | --- |
 | Web / PWA | [Abrir Gestión Clientes](https://ivory37goku.github.io/gestion-clientes/) |
-| Android | [Descargar APK Gestión Clientes 1.0.24](https://ivory37goku.github.io/gestion-clientes/downloads/gestion-clientes-1.0.24.apk) |
+| Android | [Descargar APK Gestión Clientes 1.0.25](https://ivory37goku.github.io/gestion-clientes/downloads/gestion-clientes-1.0.25.apk) |
 | Windows | [Abrir las compilaciones de Windows](https://github.com/Ivory37goku/gestion-clientes/actions/workflows/windows.yml) |
 
-En Android, descarga el APK e instálalo desde el dispositivo. En Windows, abre la última ejecución correcta del workflow y descarga el artefacto `gestion-clientes-windows`, que contiene el instalador y la versión portable. La PWA también se puede añadir a la pantalla de inicio desde el navegador.
+En Android, descarga el APK e instálalo desde el dispositivo. En Windows, descarga el instalador Setup desde el workflow. La PWA también se puede añadir a la pantalla de inicio desde el navegador.
 
 La app busca actualizaciones automáticamente y las aplica cuando no hay cambios pendientes en los formularios.
+
+### Novedades de la versión 1.0.25
+
+- El inicio muestra los pasos que faltan según los datos reales de empresa, leads, clientes y obras.
+- Corregido el ancho horizontal sobrante en móvil y escritorio; el menú lateral cerrado ya no desplaza la página.
+- Las coordenadas manuales quedan en un apartado opcional. La dirección sigue siendo el dato habitual para localizar la instalación.
 
 ## Sincronización privada
 
@@ -125,7 +131,7 @@ npm ci
 npm run dist:win
 ```
 
-El instalador NSIS y la aplicación portable se crean en `desktop-dist`. El workflow de Windows los publica como artefactos de cada compilación de `main`.
+El instalador NSIS se crea en `desktop-dist`. El workflow de Windows publica el instalador como artefacto de cada compilación de `main`.
 
 Las pruebas de regresión locales se ejecutan con `npm test`. `npm audit` comprueba también las dependencias de compilación; la dependencia vulnerable de `minimatch` se fija en una versión corregida mediante overrides limitados a Electron Builder.
 
