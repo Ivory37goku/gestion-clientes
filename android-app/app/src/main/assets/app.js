@@ -1,6 +1,8 @@
 (function () {
   'use strict';
 
+  const CORE = window.GestionClientesCore;
+  if (!CORE) throw new Error('No se pudo cargar el módulo principal de Gestión Clientes.');
   const KEY = 'gestion_clientes_data_v1';
   const CLOUD_TABLE = 'gestion_clientes';
   const CLOUD_SETUP_SQL = String.raw`-- Añade la tabla que necesita Gestión Clientes al proyecto Supabase existente.
@@ -41,6 +43,24 @@ create policy "Users can update their own Gestión Clientes data"
   with check ((select auth.uid()) = user_id);
 
 -- Actualiza la caché de esquema de PostgREST inmediatamente.
+notify pgrst, 'reload schema';
+
+-- Enlaces individuales de presupuestos. Solo la función privada administra esta tabla.
+create table if not exists public.gestion_clientes_quote_shares (
+  id uuid primary key default gen_random_uuid(),
+  owner_id uuid not null references auth.users (id) on delete cascade,
+  quote_id text not null,
+  token_hash text not null unique check (token_hash ~ '^[0-9a-f]{64}$'),
+  payload jsonb not null check (jsonb_typeof(payload) = 'object'),
+  expires_at timestamptz not null,
+  revoked_at timestamptz,
+  created_at timestamptz not null default now()
+);
+alter table public.gestion_clientes_quote_shares enable row level security;
+revoke all on table public.gestion_clientes_quote_shares from public, anon, authenticated;
+grant select, insert, update, delete on table public.gestion_clientes_quote_shares to service_role;
+create index if not exists gestion_clientes_quote_shares_owner_quote_idx
+  on public.gestion_clientes_quote_shares (owner_id, quote_id, created_at desc);
 notify pgrst, 'reload schema';`;
   const COLLECTIONS = ['leads', 'clients', 'works', 'tasks', 'quotes', 'invoices', 'payments', 'expenses', 'events', 'documents', 'team'];
   const ACTIVITY_TYPES = ['Llamada', 'WhatsApp', 'Correo', 'Visita', 'Reunión', 'Nota'];
@@ -247,7 +267,7 @@ notify pgrst, 'reload schema';`;
       logoData
     };
   }
-  const emptyData = () => ({ version: 1, company: { name: '', taxId: '', phone: '', email: '', address: '', currency: 'EUR', taxName: 'IGIC', taxRate: 7, owner: '', branding: normalizeBranding({}), quoteCatalog: [], coelcaCatalog: [] }, leads: [], clients: [], works: [], tasks: [], quotes: [], invoices: [], payments: [], expenses: [], events: [], documents: [], team: [], _meta: { deleted: {} } });
+  const emptyData = () => ({ version: 1, company: { name: '', taxId: '', phone: '', email: '', address: '', currency: 'EUR', taxName: 'IGIC', taxRate: 7, laborOfficialCost: '', laborHelperCost: '', owner: '', branding: normalizeBranding({}), quoteCatalog: [], coelcaCatalog: [] }, leads: [], clients: [], works: [], tasks: [], quotes: [], invoices: [], payments: [], expenses: [], events: [], documents: [], team: [], _meta: { deleted: {}, syncConflicts: [], resolvedConflicts: {} } });
 
   function normalize(input) {
     const source = input && typeof input === 'object' ? input : {};
@@ -273,22 +293,39 @@ notify pgrst, 'reload schema';`;
     }));
     out._meta = source._meta && typeof source._meta === 'object' ? source._meta : { deleted: {} };
     if (!out._meta.deleted) out._meta.deleted = {};
+    if (!Array.isArray(out._meta.syncConflicts)) out._meta.syncConflicts = [];
+    if (!out._meta.resolvedConflicts || typeof out._meta.resolvedConflicts !== 'object') out._meta.resolvedConflicts = {};
     return out;
   }
 
+  let storageRecoveryRequired = false;
+  let storageRecoveredFromBridge = false;
+  const validStoredData = raw => {
+    try { return CORE.inspectBackup(JSON.parse(raw)).valid; } catch (_) { return false; }
+  };
+
   function restoreBridgeStorage() {
-    const bridge = window.AndroidBridge;
+    const bridge = window.AndroidBridge || window.GestionClientesDesktopBridge;
     if (!bridge || typeof bridge.getLocalStorageSnapshot !== 'function') return;
     try {
       const snapshot = JSON.parse(bridge.getLocalStorageSnapshot() || '{}');
       Object.keys(snapshot).forEach(key => {
-        if (typeof snapshot[key] === 'string' && localStorage.getItem(key) === null) localStorage.setItem(key, snapshot[key]);
+        if (typeof snapshot[key] !== 'string') return;
+        const current = localStorage.getItem(key);
+        if (current === null && key !== KEY) localStorage.setItem(key, snapshot[key]);
+        if (key === KEY && (!current || !validStoredData(current)) && validStoredData(snapshot[key])) {
+          if (current) {
+            try { localStorage.setItem(KEY + '_damaged_' + Date.now(), current); } catch (_) {}
+          }
+          localStorage.setItem(key, snapshot[key]);
+          storageRecoveredFromBridge = true;
+        }
       });
     } catch (_) {}
   }
   restoreBridgeStorage();
   let data = load();
-  let view = 'dashboard';
+  let view = storageRecoveryRequired ? 'settings' : 'dashboard';
   let searchText = '';
   let filterValue = 'all';
   let supa = null;
@@ -300,8 +337,14 @@ notify pgrst, 'reload schema';`;
   let cloudBusy = false;
   let cloudSyncPending = false;
   let cloudSyncPendingForce = false;
+  let cloudRaceRetryCount = 0;
   let cloudRefreshPending = false;
-  let settingsTab = 'empresa';
+  let replaceCloudOnNextSync = false;
+  try { replaceCloudOnNextSync = localStorage.getItem(KEY + '_replace_cloud_pending') === '1'; } catch (_) {}
+  let saveRequestSequence = 0;
+  let downloadQueue = Promise.resolve();
+  const pendingNativeSaves = new Map();
+  let settingsTab = storageRecoveryRequired ? 'datos' : 'empresa';
   let agendaMonth = today.slice(0, 7);
   let myDayDate = today;
   let islandFilter = 'all';
@@ -314,16 +357,34 @@ notify pgrst, 'reload schema';`;
   let suppressKanbanClickUntil = 0;
 
   function load() {
+    let raw = null;
+    try { raw = localStorage.getItem(KEY); }
+    catch (err) {
+      storageRecoveryRequired = true;
+      console.error('No se puede leer el almacenamiento local de Gestión Clientes.', err);
+      return emptyData();
+    }
+    if (!raw) return emptyData();
+    if (!validStoredData(raw)) {
+      try { localStorage.setItem(KEY + '_damaged_' + Date.now(), raw); } catch (_) {}
+      storageRecoveryRequired = true;
+      console.error('Los datos locales no tienen el formato esperado. Se han conservado para recuperación.');
+      return emptyData();
+    }
     try {
-      const raw = localStorage.getItem(KEY);
-      return raw ? normalize(JSON.parse(raw)) : emptyData();
+      return normalize(JSON.parse(raw));
     } catch (err) {
       console.error('No se pudieron cargar los datos locales de Gestión Clientes.', err);
+      storageRecoveryRequired = true;
       return emptyData();
     }
   }
 
   function save(scheduleSync) {
+    if (storageRecoveryRequired) {
+      toast('No se han guardado cambios porque los datos locales necesitan recuperación. Restaura una copia válida primero.', 'bad');
+      return false;
+    }
     try {
       localStorage.setItem(KEY, JSON.stringify(data));
       mirrorBridgeStorage();
@@ -544,8 +605,8 @@ notify pgrst, 'reload schema';`;
     const supplierRow = coelcaCostRecordForLine(item);
     if (supplierRow) return Math.max(0, num(supplierRow.unitCost));
     const description = normalizeSearchText(item.description || '');
-    if (description.includes('oficial de 1 electricista') || description.includes('oficial 1 electricista')) return 25.52;
-    if (description.includes('ayudante electricista')) return 23.54;
+    if (description.includes('oficial de 1 electricista') || description.includes('oficial 1 electricista')) return data.company.laborOfficialCost !== '' && data.company.laborOfficialCost != null ? Math.max(0, num(data.company.laborOfficialCost)) : 25.52;
+    if (description.includes('ayudante electricista')) return data.company.laborHelperCost !== '' && data.company.laborHelperCost != null ? Math.max(0, num(data.company.laborHelperCost)) : 23.54;
     const catalogItem = SOLAR_QUOTE_CATALOG.find(row =>
       normalizeSearchText(row.description) === description && normalizeSearchText(row.unit || 'ud') === normalizeSearchText(item.unit || 'ud') && row.unitCost != null
     );
@@ -554,9 +615,10 @@ notify pgrst, 'reload schema';`;
   function quoteUnitCostSource(item) {
     if (item && item.unitCostSource) return String(item.unitCostSource);
     const supplierRow = coelcaCostRecordForLine(item);
-    if (supplierRow) return 'Coelca · ' + (supplierRow.reference ? 'ref. ' + supplierRow.reference : 'coste importado') + (supplierRow.sourceFile ? ' · ' + supplierRow.sourceFile : '');
+    if (supplierRow) return 'Coelca · ' + (supplierRow.reference ? 'ref. ' + supplierRow.reference : 'coste importado') + (supplierRow.sourceFile ? ' · ' + supplierRow.sourceFile : '') + (supplierRow.sourceDate ? ' · tarifa ' + supplierRow.sourceDate : '');
     const description = normalizeSearchText(item && item.description || '');
-    if (description.includes('oficial de 1 electricista') || description.includes('oficial 1 electricista') || description.includes('ayudante electricista')) return 'CYPE · coste directo de referencia';
+    if (description.includes('oficial de 1 electricista') || description.includes('oficial 1 electricista')) return data.company.laborOfficialCost !== '' && data.company.laborOfficialCost != null ? 'Coste real oficial configurado por la empresa' : 'CYPE · coste directo de referencia (ajustable)';
+    if (description.includes('ayudante electricista')) return data.company.laborHelperCost !== '' && data.company.laborHelperCost != null ? 'Coste real ayudante configurado por la empresa' : 'CYPE · coste directo de referencia (ajustable)';
     const catalogItem = SOLAR_QUOTE_CATALOG.find(row => normalizeSearchText(row.description) === description && row.unitCost != null);
     return catalogItem ? (SOLAR_PRICE_SOURCES[catalogItem.source] || {}).label || 'Coste de referencia' : '';
   }
@@ -593,7 +655,7 @@ notify pgrst, 'reload schema';`;
     };
   }
   function quoteProfitSummaryMarkup() {
-    return '<section class="quote-profit-summary" data-quote-profit-summary data-state="empty" aria-live="polite"><div class="quote-profit-head"><div><p class="eyebrow">CONTROL INTERNO · PRIVADO</p><h3>Rentabilidad estimada</h3><p data-profit-status>Importa la tarifa de Coelca o añade costes de compra para calcular tu beneficio.</p></div><span class="quote-profit-badge" data-profit-badge>Sin calcular</span></div><div class="quote-profit-metrics"><div><span data-profit-cost-label>Costes directos registrados</span><strong data-profit-cost>—</strong></div><div><span data-profit-gross-label>Beneficio bruto estimado</span><strong data-profit-gross>—</strong></div><div><span>Margen sobre la base</span><strong data-profit-margin>—</strong></div></div><p class="quote-profit-note">Base de venta sin IGIC menos los costes de compra y mano de obra registrados. No incluye gastos generales, financiación ni impuestos sobre beneficios. Los costes nunca se envían al cliente.</p></section>';
+    return '<section class="quote-profit-summary" data-quote-profit-summary data-state="empty" aria-live="polite"><div class="quote-profit-head"><div><p class="eyebrow">CONTROL INTERNO · PRIVADO</p><h3>Rentabilidad estimada</h3><p data-profit-status>Importa la tarifa de Coelca o añade costes de compra para calcular tu beneficio.</p></div><span class="quote-profit-badge" data-profit-badge>Sin calcular</span></div><div class="quote-profit-metrics"><div><span data-profit-cost-label>Costes directos registrados</span><strong data-profit-cost>—</strong></div><div><span data-profit-gross-label>Beneficio bruto estimado</span><strong data-profit-gross>—</strong></div><div><span>Margen sobre la base</span><strong data-profit-margin>—</strong></div></div><p class="quote-profit-note">Base de venta sin IGIC menos los costes directos registrados. No incluye gastos generales, financiación ni impuestos sobre beneficios. Configura el coste real de tu equipo en Ajustes → Empresa; si lo dejas vacío se usan referencias CYPE. Los costes nunca se envían al cliente.</p></section>';
   }
   function updateQuoteProfitSummary(root, stats) {
     if (!root || !stats) return;
@@ -1181,9 +1243,7 @@ notify pgrst, 'reload schema';`;
 
   function renderAgenda() {
     const start = agendaMonth + '-01';
-    const d0 = new Date(start + 'T12:00:00');
-    const next = new Date(d0.getFullYear(), d0.getMonth() + 1, 1);
-    const end = dateKey(new Date(next.getTime() - 86400000));
+    const end = CORE.monthEndKey(agendaMonth);
     const events = data.events.filter(e => e.date >= start && e.date <= end).map(e => Object.assign({ _kind: 'event' }, e));
     const tasks = data.tasks.filter(t => isTaskOpen(t) && t.due >= start && t.due <= end).map(t => Object.assign({ _kind: 'task', date: t.due, title: t.title, owner: t.owner, linkId: t.id }));
     const leads = data.leads.filter(l => l.nextDate && l.nextDate >= start && l.nextDate <= end && !['Ganado', 'Perdido'].includes(l.stage)).map(l => ({ id: l.id, _kind: 'lead', date: l.nextDate, title: 'Seguimiento · ' + (l.company || l.name), notes: l.phone || l.email }));
@@ -1201,15 +1261,12 @@ notify pgrst, 'reload schema';`;
     const month = today.slice(0, 7);
     const open = data.leads.filter(l => !['Ganado', 'Perdido'].includes(l.stage));
     const win = data.leads.filter(l => l.stage === 'Ganado');
-    const billed = data.invoices.reduce((s, i) => s + total(i), 0);
-    const collected = data.payments.reduce((s, p) => s + num(p.amount), 0);
-    const expenses = data.expenses.reduce((s, x) => s + num(x.amount), 0);
-    const monthBilled = data.invoices.filter(i => (i.date || '').slice(0, 7) === month).reduce((s, i) => s + total(i), 0);
-    const monthCosts = data.expenses.filter(i => (i.date || '').slice(0, 7) === month).reduce((s, i) => s + num(i.amount), 0);
+    const financial = CORE.financialMetrics(data.invoices, data.payments, data.expenses, month);
+    const monthDifference = financial.monthBaseInvoiced - financial.monthRecordedCosts;
     const workRows = data.works.length ? '<div class="table-wrap"><table><thead><tr><th>Obra</th><th>Cliente</th><th>Estado</th><th class="numeric">Presupuesto</th><th class="numeric">Avance</th><th class="numeric">Gastos</th></tr></thead><tbody>' + data.works.map(w => '<tr><td><strong>' + esc(w.name) + '</strong></td><td>' + esc(selected(data.clients, w.clientId)) + '</td><td>' + badge(w.status) + '</td><td class="numeric">' + esc(money(w.budget)) + '</td><td class="numeric">' + esc(num(w.progress) + '%') + '</td><td class="numeric">' + esc(money(data.expenses.filter(e => e.workId === w.id).reduce((s, e) => s + num(e.amount), 0))) + '</td></tr>').join('') + '</tbody></table></div>' : empty('Sin obras para analizar', 'Crea obras para consultar su presupuesto y costes.', 'work', 'Crear obra');
     return header('ANÁLISIS', 'Informes', 'Una lectura rápida del estado comercial y financiero.', '<button class="btn" data-action="print">Imprimir / PDF</button><button class="btn" data-action="export-report">Exportar CSV</button>') +
-      '<div class="kpis">' + kpi('Leads activos', open.length, money(open.reduce((s, x) => s + num(x.value), 0)) + ' de valor potencial', '✳') + kpi('Conversión ganada', win.length + (data.leads.length ? ' / ' + data.leads.length : ''), data.leads.length ? Math.round(win.length / data.leads.length * 100) + '% del total' : 'Sin leads todavía', '↗') + kpi('Facturado acumulado', money(billed), money(collected) + ' cobrado', '€') + kpi('Gastos registrados', money(expenses), money(monthCosts) + ' este mes', '↘') + '</div>' +
-      '<div class="grid-2 grid-even">' + card('Actividad financiera · ' + monthFmt(month), '<div class="list">' + row('Facturado este mes', 'Base imponible más impuestos', '', '<span class="row-amount">' + esc(money(monthBilled)) + '</span>') + row('Gastos este mes', 'Costes registrados', '', '<span class="row-amount">' + esc(money(monthCosts)) + '</span>') + row('Margen estimado', 'Facturación menos gastos del mes', '', '<span class="row-amount">' + esc(money(monthBilled - monthCosts)) + '</span>') + '</div>', 'Importes según los registros disponibles') + card('Datos de la empresa', '<div class="list">' + row('Clientes', String(data.clients.length), '', '') + row('Obras activas', String(data.works.filter(w => w.status === 'En curso').length), '', '') + row('Tareas pendientes', String(data.tasks.filter(t => isTaskOpen(t)).length), '', '') + row('Presupuestos enviados', String(data.quotes.filter(q => q.status === 'Enviada').length), '', '') + '</div>', 'Actividad registrada') + '</div><div style="margin-top:14px">' + card('Rentabilidad por obra', workRows, 'Presupuesto frente a gastos asociados') + '</div>';
+      '<div class="kpis">' + kpi('Leads activos', open.length, money(open.reduce((s, x) => s + num(x.value), 0)) + ' de valor potencial', '✳') + kpi('Conversión ganada', win.length + (data.leads.length ? ' / ' + data.leads.length : ''), data.leads.length ? Math.round(win.length / data.leads.length * 100) + '% del total' : 'Sin leads todavía', '↗') + kpi('Facturado acumulado', money(financial.totalInvoiced), 'Base ' + money(financial.baseInvoiced) + ' · IGIC ' + money(financial.taxCharged), '€') + kpi('Gastos registrados', money(financial.recordedCosts), 'Importe anotado; IGIC sin separar', '↘') + '</div>' +
+      '<div class="grid-2 grid-even">' + card('Actividad financiera · ' + monthFmt(month), '<div class="list">' + row('Base facturada', 'Antes de IGIC', '', '<span class="row-amount">' + esc(money(financial.monthBaseInvoiced)) + '</span>') + row('IGIC en facturas', 'Calculado con el tipo de cada factura', '', '<span class="row-amount">' + esc(money(financial.monthTaxCharged)) + '</span>') + row('Total facturado', 'Base más IGIC', '', '<span class="row-amount">' + esc(money(financial.monthTotalInvoiced)) + '</span>') + row('Gastos anotados', 'Tal como se introdujeron', '', '<span class="row-amount">' + esc(money(financial.monthRecordedCosts)) + '</span>') + row('Diferencia orientativa', 'Base facturada menos gastos anotados', '', '<span class="row-amount">' + esc(money(monthDifference)) + '</span>') + '</div><p class="modal-note">La diferencia es solo orientativa, no un beneficio contable o fiscal. Los gastos no separan automáticamente su IGIC y pueden haberse anotado con o sin impuesto.</p>', 'Ventas, impuesto y gastos se muestran por separado') + card('Datos de la empresa', '<div class="list">' + row('Clientes', String(data.clients.length), '', '') + row('Obras activas', String(data.works.filter(w => w.status === 'En curso').length), '', '') + row('Tareas pendientes', String(data.tasks.filter(t => isTaskOpen(t)).length), '', '') + row('Presupuestos enviados', String(data.quotes.filter(q => q.status === 'Enviada').length), '', '') + '</div>', 'Actividad registrada') + '</div><div style="margin-top:14px">' + card('Rentabilidad por obra', workRows, 'Presupuesto frente a gastos asociados') + '</div>';
   }
 
   function coelcaCsvCells(line, delimiter) {
@@ -1259,6 +1316,11 @@ notify pgrst, 'reload schema';`;
     const unitCostIndex = findColumn([/costeunitario/, /preciounitario/, /costeneto/, /precioneto/, /preciobase/, /preciosinigic/, /precioantesimpuesto/, /precio(?:de)?compra/, /coste(?:de)?compra/, /^coste$/, /^precio$/]);
     const lineAmountIndex = findColumn([/importetotal/, /^importe$/, /costetotal/, /preciototal/, /subtotal/]);
     const quantityIndex = findColumn([/^cantidad$/, /^cant\.?$/, /^qty$/, /^unidades$/, /^uds$/]);
+    const taxRateIndex = findColumn([/tipodeigic/, /tipoigic/, /porcentajeigic/, /tipodeiva/, /tipoiva/, /taxrate/, /impuesto.*porcentaje/, /igic.*%/, /iva.*%/]);
+    const sourceDateIndex = findColumn([/fechatarifa/, /fechaprecio/, /fechavigencia/, /vigenciadesde/, /fechaactualizacion/, /updatedate/, /pricedate/]);
+    const originalPriceHeader = unitCostIndex >= 0 ? normalizeSearchText(rows[headerIndex][unitCostIndex]) : '';
+    const explicitNetPrice = /sinigic|siniva|neto|baseimponible|antesdeimpuesto/.test(originalPriceHeader);
+    const explicitGrossPrice = /conigic|coniva|incluyeigic|incluyeiva|impuestoincluido|preciobruto|gross/.test(originalPriceHeader);
     if (descriptionIndex < 0 || (unitCostIndex < 0 && lineAmountIndex < 0)) throw new Error('La tarifa necesita descripción y coste/precio unitario.');
     const parsed = [];
     for (let index = headerIndex + 1; index < rows.length; index++) {
@@ -1276,8 +1338,13 @@ notify pgrst, 'reload schema';`;
         unitCost = Number.isFinite(amount) && quantity > 0 ? amount / quantity : amount;
       }
       if (!description || !Number.isFinite(unitCost) || unitCost < 0) continue;
-      if (includesTax) unitCost /= 1 + Math.max(0, num(data.company.taxRate)) / 100;
-      parsed.push({ reference, description: String(description).trim(), unit: unitIndex >= 0 ? String(row[unitIndex] || 'ud').trim() || 'ud' : 'ud', unitCost: roundMoney(unitCost) });
+      const rowTaxLabel = taxRateIndex >= 0 ? String(row[taxRateIndex] || '').trim() : '';
+      const rowTaxNumber = coelcaCsvNumber(rowTaxLabel.replace(/%/g, ''));
+      const rowSaysTaxIncluded = /incluid|con\s*(?:igic|iva)|bruto/i.test(rowTaxLabel);
+      const rowSaysNet = /sin\s*(?:igic|iva)|neto|base/i.test(rowTaxLabel);
+      const normalizedCost = CORE.normalizeSupplierCost(unitCost, { explicitNet: explicitNetPrice, explicitGross: explicitGrossPrice, rowSaysNet, rowSaysTaxIncluded, rowTaxRate: rowTaxNumber, fallbackTaxRate: data.company.taxRate, includesTax });
+      const sourceDate = sourceDateIndex >= 0 ? String(row[sourceDateIndex] || '').trim() : '';
+      parsed.push({ reference, description: String(description).trim(), unit: unitIndex >= 0 ? String(row[unitIndex] || 'ud').trim() || 'ud' : 'ud', unitCost: normalizedCost.unitCost, costBasis: 'net', taxRateApplied: normalizedCost.taxRateApplied, sourceDate });
     }
     if (!parsed.length) throw new Error('No encontré productos con coste válido en el archivo.');
     return parsed;
@@ -1328,13 +1395,24 @@ notify pgrst, 'reload schema';`;
   function renderCoelcaCostSettings(nav) {
     const items = (data.company.coelcaCatalog || []).slice().sort((a, b) => normalizeSearchText(a.description).localeCompare(normalizeSearchText(b.description), 'es'));
     const latest = items.reduce((result, item) => !result || String(item.importedAt || '') > String(result) ? item.importedAt : result, '');
-    const rows = items.length ? '<div class="list">' + items.map(item => '<div class="row-item"><div class="row-main"><div class="row-title">' + esc(item.description) + '</div><div class="row-sub">' + esc([item.reference ? 'Ref. ' + item.reference : '', item.unit || 'ud', 'Coste de compra sin IGIC', item.sourceFile || 'Tarifa Coelca'].filter(Boolean).join(' · ')) + '</div></div><div class="row-end"><strong class="row-amount">' + esc(money(item.unitCost)) + ' / ' + esc(item.unit || 'ud') + '</strong></div></div>').join('') + '</div>' : '<div class="empty-state"><strong>Aún no hay precios de Coelca</strong><p>Importa una tarifa o factura CSV una vez. Las partidas aparecerán después dentro de tus presupuestos con el coste de compra ya cargado.</p></div>';
+    const rows = items.length ? '<div class="list">' + items.map(item => '<div class="row-item"><div class="row-main"><div class="row-title">' + esc(item.description) + '</div><div class="row-sub">' + esc([item.reference ? 'Ref. ' + item.reference : '', item.unit || 'ud', 'Coste de compra sin IGIC', item.sourceDate ? 'Tarifa ' + item.sourceDate : '', item.sourceFile || 'Tarifa Coelca'].filter(Boolean).join(' · ')) + '</div></div><div class="row-end"><strong class="row-amount">' + esc(money(item.unitCost)) + ' / ' + esc(item.unit || 'ud') + '</strong></div></div>').join('') + '</div>' : '<div class="empty-state"><strong>Aún no hay precios de Coelca</strong><p>Importa una tarifa o factura CSV una vez. Las partidas aparecerán después dentro de tus presupuestos con el coste de compra ya cargado.</p></div>';
     const updatedLabel = latest ? 'Última importación: ' + dateFmt(String(latest).slice(0, 10)) : 'Sin tarifas importadas';
     return header('PROVEEDOR', 'Ajustes', 'Costes de compra de Coelca para calcular tu beneficio real.') + nav +
       '<section class="card coelca-cost-card"><div class="card-head"><div><h2>Tarifa de compra · Coelca</h2><p>El coste se guarda aparte del precio que cobras al cliente. El beneficio se calcula como venta menos coste; los precios importados nunca se muestran al cliente.</p></div><span class="badge">' + items.length + ' productos</span></div>' +
       '<div class="coelca-import-actions"><label class="field"><span>¿Los precios del archivo incluyen IGIC?</span><select data-coelca-tax-mode><option value="net" selected>No, vienen sin IGIC</option><option value="gross">Sí, incluyen IGIC (' + esc(solarNumber(data.company.taxRate)) + '%)</option></select></label><div class="head-actions"><input id="coelca-cost-file" type="file" accept=".csv,.txt,text/csv,text/plain" hidden><button type="button" class="btn btn-primary" data-action="coelca-import-file">Importar tarifa CSV de Coelca</button><button type="button" class="btn" data-action="coelca-cost-template">Descargar plantilla</button></div></div>' +
-      '<p class="modal-note coelca-cost-help">Formato recomendado: <strong>referencia;descripcion;unidad;coste_unitario_sin_igic</strong>. También reconoce columnas habituales de código, artículo, cantidad, precio unitario e importe. Elige si el archivo incluye IGIC. <a href="' + esc(SOLAR_PRICE_SOURCES.coelca.url) + '" target="_blank" rel="noopener">Abrir catálogo público de Coelca ↗</a>. ' + esc(updatedLabel) + '</p>' + rows +
+      '<p class="modal-note coelca-cost-help">Formato recomendado: <strong>referencia;descripcion;unidad;coste_unitario_sin_igic</strong>. Lee el tipo de IGIC/IVA de cada fila cuando el CSV lo incluye; si no, usa el selector. Un encabezado que diga «sin IGIC», «neto» o «base» prevalece y evita descontar el impuesto dos veces. <a href="' + esc(SOLAR_PRICE_SOURCES.coelca.url) + '" target="_blank" rel="noopener">Abrir catálogo público de Coelca ↗</a>. ' + esc(updatedLabel) + '</p>' + rows +
       (items.length ? '<div class="head-actions"><button type="button" class="btn btn-danger btn-sm" data-action="coelca-clear-costs">Vaciar costes importados</button></div>' : '') + '</section>';
+  }
+  function renderSyncConflictsPanel() {
+    const conflicts = data._meta.syncConflicts || [];
+    if (!conflicts.length) return '';
+    const titles = { leads: 'lead', clients: 'cliente', works: 'obra', tasks: 'tarea', quotes: 'presupuesto', invoices: 'factura', payments: 'cobro', expenses: 'gasto', events: 'cita', documents: 'documento', team: 'persona' };
+    const rows = conflicts.slice(0, 30).map(conflict => {
+      const localAction = '<button type="button" class="tiny-btn" data-action="resolve-sync-conflict" data-id="' + esc(conflict.id) + '" data-version="local">Conservar este dispositivo</button>';
+      const remoteAction = '<button type="button" class="tiny-btn" data-action="resolve-sync-conflict" data-id="' + esc(conflict.id) + '" data-version="remote">Conservar nube</button>';
+      return '<div class="sync-conflict-item"><div><strong>' + esc(titles[conflict.collection] || conflict.collection) + ' · ' + esc(conflict.recordId) + '</strong><span>Este dispositivo: ' + esc(syncConflictCaption(conflict.localVersion)) + '</span><span>Nube: ' + esc(syncConflictCaption(conflict.remoteVersion)) + '</span></div><div class="head-actions">' + localAction + remoteAction + '</div></div>';
+    }).join('');
+    return '<section class="card sync-conflicts-card"><div class="card-head"><div><h2>Ediciones en conflicto</h2><p>' + conflicts.length + ' registros cambiaron en más de un dispositivo desde la última sincronización. Se guardaron ambas versiones para que elijas.</p></div><button type="button" class="btn btn-sm" data-action="export-sync-conflicts">Descargar versiones</button></div><div class="sync-conflict-list">' + rows + '</div>' + (conflicts.length > 30 ? '<p class="modal-note">Se muestran los primeros 30. Descarga el archivo para revisar el resto.</p>' : '') + '</section>';
   }
   function renderSettings() {
     const tabs = [['empresa', 'Empresa'], ['marca', 'Marca'], ['costes', 'Costes Coelca'], ['equipo', 'Equipo'], ['datos', 'Datos y nube']];
@@ -1350,7 +1428,10 @@ notify pgrst, 'reload schema';`;
         settingsField('email', 'Correo electrónico', data.company.email, 'email') +
         settingsField('owner', 'Tu nombre', data.company.owner, 'text') +
         settingsField('taxRate', 'IGIC por defecto (%)', data.company.taxRate, 'number') +
+        settingsField('laborOfficialCost', 'Coste real oficial 1.ª (€/h)', data.company.laborOfficialCost, 'number') +
+        settingsField('laborHelperCost', 'Coste real ayudante (€/h)', data.company.laborHelperCost, 'number') +
         '<p class="modal-note full" style="grid-column:1/-1;margin:0">Tipo general en Canarias: 7 %. Ajusta el porcentaje si la operación lleva otro tipo o está exenta.</p>' +
+        '<p class="modal-note full" style="grid-column:1/-1;margin:0">El coste horario es solo interno. Si lo dejas vacío, se usa una referencia CYPE orientativa (25,52 €/h para oficial y 23,54 €/h para ayudante), no el coste real de tu empresa.</p>' +
         settingsField('address', 'Dirección', data.company.address, 'text', 'full') +
         '</div><div style="margin-top:14px">' + btn('Guardar empresa', 'save-company', 'btn-primary', ' type="submit"') + '</div></form></section>' +
         '<div style="margin-top:14px">' + card('Cómo se organiza la información', '<div class="list"><div class="row-item"><div class="row-main"><div class="row-title">Lead → cliente</div><div class="row-sub">Convierte un contacto ganado y conserva su historial comercial.</div></div></div><div class="row-item"><div class="row-main"><div class="row-title">Cliente → obras</div><div class="row-sub">Un cliente puede tener varias obras, presupuestos, facturas y tareas.</div></div></div><div class="row-item"><div class="row-main"><div class="row-title">Obra → tareas y costes</div><div class="row-sub">Asigna responsables, fechas, gastos y documentación vinculada.</div></div></div></div>', 'Los datos se guardan primero en este dispositivo.') + '</div>';
@@ -1365,16 +1446,18 @@ notify pgrst, 'reload schema';`;
     const sqlEditorUrl = projectRef ? 'https://supabase.com/dashboard/project/' + encodeURIComponent(projectRef) + '/sql/new' : 'https://supabase.com/dashboard';
     const setupActions = '<div class="cloud-setup-actions"><button type="button" class="btn btn-sm" data-action="cloud-setup">Descargar SQL de Gestión Clientes</button><a class="btn btn-sm" href="' + esc(sqlEditorUrl) + '" target="_blank" rel="noopener">Abrir Editor SQL ↗</a></div>';
     const cloudWarning = cloudProblem ? '<div class="cloud-alert" role="alert"><strong>Hay que revisar la conexión</strong><p>' + esc(cloudProblem) + '</p>' + (cloudSetupRequired ? setupActions : '') + '</div>' : '';
-    const cloudSetupHelp = !cloudUser && !cloudProblem ? '<div class="cloud-setup-help"><strong>Prepara esta app en el proyecto compartido</strong><ol><li>Usa el mismo correo y contraseña que en Control Laboral.</li><li>Ejecuta el SQL de Gestión Clientes una vez; crea únicamente su tabla privada y recarga la caché del esquema.</li><li>Confirma el correo si Supabase te lo solicita.</li></ol>' + setupActions + '</div>' : '';
+    const cloudSetupHelp = !cloudUser && !cloudProblem ? '<div class="cloud-setup-help"><strong>Prepara esta app en el proyecto compartido</strong><ol><li>Usa el mismo correo y contraseña que en Control Laboral.</li><li>Ejecuta el SQL de Gestión Clientes una vez; crea únicamente sus tablas privadas y recarga la caché del esquema.</li><li>Confirma el correo si Supabase te lo solicita.</li><li>Para enlaces de presupuesto revocables, despliega la Edge Function quote-share siguiendo el README de la app.</li></ol>' + setupActions + '</div>' : '';
     const cloudPanel = '<div class="card"><div class="card-head"><div><h2>Sincronización privada</h2><p>La cuenta sirve en ambas apps; cada una conserva sus datos en una tabla independiente.</p></div><span class="badge ' + (cloudProblem ? 'yellow' : cloudUser ? 'green' : '') + '">' + esc(cloudUser ? cloudUser.email : cloudProblem ? 'Requiere atención' : 'Desconectado') + '</span></div>' + cloudWarning +
       (cloudUser ? '<p class="modal-note">Los cambios se sincronizan en segundo plano cuando hay conexión. Las copias locales siguen disponibles sin internet.</p><div class="head-actions"><button class="btn btn-primary" data-action="cloud-sync">Sincronizar ahora</button><button class="btn" data-action="cloud-logout">Cerrar sesión</button></div>' :
         '<p class="modal-note">El almacenamiento y las copias JSON funcionan sin cuenta. Para sincronizar entre móvil y ordenador, inicia sesión con la misma cuenta en las dos aplicaciones.</p><form id="cloud-form"><div class="fields"><div class="field"><label for="cloud-email">Correo</label><input id="cloud-email" name="email" type="email" value="' + esc(cloudEmailDraft) + '" autocomplete="username" required></div><div class="field"><label for="cloud-password">Contraseña</label><input id="cloud-password" name="password" type="password" autocomplete="current-password" minlength="6" required><span class="hint">El acceso admite la contraseña de 6 caracteres que ya creaste.</span></div></div><div class="head-actions" style="margin-top:12px"><button class="btn btn-primary" type="submit" data-cloud-mode="login">Iniciar sesión</button><button class="btn" type="submit" data-cloud-mode="signup">Crear cuenta</button></div></form>') +
       cloudSetupHelp + '</div>';
-    const dataPanel = '<div class="card"><div class="card-head"><div><h2>Copias y exportaciones</h2><p>Conserva tus datos o llévalos a otra instalación.</p></div></div><div class="head-actions"><button class="btn btn-primary" data-action="backup">Descargar copia JSON</button><button class="btn" data-action="restore">Restaurar copia</button><button class="btn" data-action="export-all">Exportar registros CSV</button><input id="restore-input" type="file" accept="application/json,.json" hidden></div><p class="modal-note" style="margin-top:12px">La copia JSON incluye todos los registros, relaciones, configuración e historial de cobros.</p></div>';
-    return header('DATOS', 'Ajustes', 'Copias de seguridad y sincronización en tus dispositivos.') + nav + '<div class="stack">' + dataPanel + cloudPanel + card('Almacenamiento', '<div class="row-item"><div class="row-main"><div class="row-title">Datos locales</div><div class="row-sub">Guardados automáticamente en este dispositivo.</div></div><span class="badge green">Activo</span></div>', 'Sin conexión disponible') + '</div>';
+    const recoveryAlert = storageRecoveryRequired ? '<div class="cloud-alert" role="alert"><strong>No guardes cambios todavía</strong><p>Los datos locales no se pudieron leer. Se conservaron sin sobrescribirlos. Restaura una copia JSON válida para recuperar el uso normal de la app.</p></div>' : '';
+    const cloudReplaceAlert = replaceCloudOnNextSync ? '<div class="cloud-alert" role="status"><strong>Restauración pendiente de sincronizar</strong><p>La próxima sincronización sustituirá la copia de nube con el respaldo que acabas de restaurar.</p></div>' : '';
+    const dataPanel = '<div class="card"><div class="card-head"><div><h2>Copias y exportaciones</h2><p>Conserva tus datos o llévalos a otra instalación.</p></div></div>' + recoveryAlert + cloudReplaceAlert + '<div class="head-actions"><button class="btn btn-primary" data-action="backup"' + (storageRecoveryRequired ? ' disabled' : '') + '>Descargar copia JSON</button><button class="btn" data-action="restore">Restaurar copia</button><button class="btn" data-action="export-all"' + (storageRecoveryRequired ? ' disabled' : '') + '>Exportar registros CSV</button><input id="restore-input" type="file" accept="application/json,.json" hidden></div><p class="modal-note" style="margin-top:12px">La copia JSON incluye todos los registros, relaciones, configuración e historial de cobros. Antes de restaurar se descarga una copia del estado actual.</p></div>';
+    return header('DATOS', 'Ajustes', 'Copias de seguridad y sincronización en tus dispositivos.') + nav + '<div class="stack">' + renderSyncConflictsPanel() + dataPanel + cloudPanel + card('Almacenamiento', '<div class="row-item"><div class="row-main"><div class="row-title">Datos locales</div><div class="row-sub">' + (storageRecoveryRequired ? 'Recuperación necesaria antes de seguir editando.' : 'Guardados automáticamente en este dispositivo.') + '</div></div><span class="badge ' + (storageRecoveryRequired ? 'yellow' : 'green') + '">' + (storageRecoveryRequired ? 'Revisar' : 'Activo') + '</span></div>', 'Sin conexión disponible') + '</div>';
   }
   function settingsField(name, label, value, type, size, placeholder) {
-    return '<div class="field ' + (size || '') + '"><label for="co-' + name + '">' + esc(label) + '</label><input id="co-' + name + '" name="' + name + '" type="' + (type || 'text') + '" value="' + esc(value == null ? '' : value) + '"' + (placeholder ? ' placeholder="' + esc(placeholder) + '"' : '') + '></div>';
+    return '<div class="field ' + (size || '') + '"><label for="co-' + name + '">' + esc(label) + '</label><input id="co-' + name + '" name="' + name + '" type="' + (type || 'text') + '"' + (type === 'number' ? ' step="0.01" min="0"' : '') + ' value="' + esc(value == null ? '' : value) + '"' + (placeholder ? ' placeholder="' + esc(placeholder) + '"' : '') + '></div>';
   }
 
   function quoteBreakdown(item) {
@@ -1419,7 +1502,7 @@ notify pgrst, 'reload schema';`;
     return '<section class="quote-materials-panel"><div class="card-head"><div><p class="eyebrow">USO INTERNO · APROVISIONAMIENTO</p><h3>Material para preparar o pedir</h3><p>' + esc(work ? work.name : 'Lista del presupuesto') + (materials.length ? ' · ' + materials.length + (materials.length === 1 ? ' partida agrupada' : ' partidas agrupadas') : '') + '</p></div><button type="button" class="btn btn-sm btn-primary" data-action="export-quote-materials" data-id="' + esc(quote.id) + '"' + (materials.length ? '' : ' disabled') + '>Descargar lista CSV</button></div><div class="table-wrap"><table><thead><tr><th>Material / referencia</th><th class="numeric">Cantidad</th><th>Unidad</th><th class="numeric">Coste unitario interno</th><th class="numeric">Coste total interno</th></tr></thead><tbody>' + body + '</tbody></table></div><p class="material-list-note">Esta lista no aparece en el presupuesto del cliente. ' + (pendingCosts ? pendingCosts + (pendingCosts === 1 ? ' partida no tiene coste de compra completo; importa la tarifa de Coelca o completa el coste antes de calcular el margen.' : ' partidas no tienen coste de compra completo; importa la tarifa de Coelca o completa los costes antes de calcular el margen.') : 'Los costes mostrados son internos y proceden de los costes registrados en esta empresa.') + '</p></section>';
   }
 
-  function exportQuoteMaterials(id) {
+  async function exportQuoteMaterials(id) {
     const quote = data.quotes.find(row => row.id === id);
     if (!quote) return;
     const materials = quoteMaterialRows(quote);
@@ -1434,8 +1517,8 @@ notify pgrst, 'reload schema';`;
     const csv = '\ufeff' + rows.map(row => row.map(csvEscape).join(';')).join('\r\n');
     const safeWorkName = String(work && work.name || quote.number || quote.title || 'presupuesto').normalize('NFD').replace(/[\u0300-\u036f]/g, '').replace(/[^a-z0-9-]+/gi, '-').replace(/^-|-$/g, '').slice(0, 60) || 'presupuesto';
     const fileName = 'materiales-' + safeWorkName + '-' + today + '.csv';
-    download(fileName, csv, 'text/csv;charset=utf-8');
-    toast('Lista de ' + materials.length + (materials.length === 1 ? ' material descargada.' : ' materiales descargada.'), 'good');
+    const saved = await download(fileName, csv, 'text/csv;charset=utf-8');
+    toast(saved ? 'Lista de ' + materials.length + (materials.length === 1 ? ' material guardada.' : ' materiales guardada.') : 'No se pudo guardar la lista de materiales.', saved ? 'good' : 'bad');
   }
 
   function documentBrandMarkup(type, item) {
@@ -1450,6 +1533,8 @@ notify pgrst, 'reload schema';`;
     const work = data.works.find(row => row.id === quote.workId);
     const result = work && work.solarStudy && work.solarStudy.result;
     if (!result || !Array.isArray(result.monthly) || !result.monthly.length) return '';
+    const solarConfig = work.solarStudy.config || result.config || {};
+    const approximateSolarLocation = /approx|localidad|cercano/i.test([solarConfig.locationSource, solarConfig.locationQuality].join(' '));
     const left = result.monthly.slice(0, 6);
     const right = result.monthly.slice(6, 12);
     const monthRows = Array.from({ length: Math.max(left.length, right.length) }, (_, index) => {
@@ -1457,7 +1542,7 @@ notify pgrst, 'reload schema';`;
       const b = right[index];
       return '<tr><td>' + esc(a ? monthName(a.month) : '') + '</td><td class="numeric">' + esc(a ? solarNumber(a.energyKwh) + ' kWh' : '') + '</td><td>' + esc(b ? monthName(b.month) : '') + '</td><td class="numeric">' + esc(b ? solarNumber(b.energyKwh) + ' kWh' : '') + '</td></tr>';
     }).join('');
-    return '<section class="quote-solar-summary"><div class="card-head"><div><p class="eyebrow">ANÁLISIS DE LA OBRA</p><h3>Producción solar estimada · PVGIS</h3><p>Resultado calculado para esta ubicación con el sistema descrito.</p></div><span class="badge">PVGIS 5.3</span></div><div class="solar-quote-stats"><div><span>Producción anual</span><strong>' + esc(solarNumber(result.annualKwh)) + ' kWh</strong></div><div><span>Rendimiento</span><strong>' + esc(solarNumber(result.specificYield)) + ' kWh/kWp</strong></div><div><span>Potencia instalada</span><strong>' + esc(solarNumber(result.config && result.config.peakPower)) + ' kWp</strong></div><div><span>Radiación anual</span><strong>' + esc(solarNumber(result.annualIrradiation)) + ' kWh/m²</strong></div></div><div class="table-wrap solar-month-table"><table><thead><tr><th>Mes</th><th class="numeric">Producción</th><th>Mes</th><th class="numeric">Producción</th></tr></thead><tbody>' + monthRows + '</tbody></table></div><p class="solar-source-note">Fuente: PVGIS 5.3, Comisión Europea (JRC), ubicación ' + esc(solarNumber(result.latitude)) + ', ' + esc(solarNumber(result.longitude)) + '. Producción media estimada; el resultado final depende de sombras, instalación y consumo real.</p></section>';
+    return '<section class="quote-solar-summary"><div class="card-head"><div><p class="eyebrow">ANÁLISIS DE LA OBRA</p><h3>Producción solar estimada · PVGIS</h3><p>Resultado calculado para esta ubicación con el sistema descrito.</p></div><span class="badge">PVGIS 5.3</span></div><div class="solar-quote-stats"><div><span>Producción anual</span><strong>' + esc(solarNumber(result.annualKwh)) + ' kWh</strong></div><div><span>Rendimiento</span><strong>' + esc(solarNumber(result.specificYield)) + ' kWh/kWp</strong></div><div><span>Potencia instalada</span><strong>' + esc(solarNumber(solarConfig.peakPower || result.config && result.config.peakPower)) + ' kWp</strong></div><div><span>Radiación anual</span><strong>' + esc(solarNumber(result.annualIrradiation)) + ' kWh/m²</strong></div></div><div class="table-wrap solar-month-table"><table><thead><tr><th>Mes</th><th class="numeric">Producción</th><th>Mes</th><th class="numeric">Producción</th></tr></thead><tbody>' + monthRows + '</tbody></table></div><p class="solar-source-note">Fuente: PVGIS 5.3, Comisión Europea (JRC), ubicación ' + esc(solarNumber(result.latitude)) + ', ' + esc(solarNumber(result.longitude)) + '. Producción media estimada; el resultado final depende de sombras, instalación y consumo real.</p>' + (approximateSolarLocation ? '<p class="solar-location-warning"><strong>Ubicación aproximada:</strong> ' + esc(solarConfig.locationQuality || 'el punto no coincide necesariamente con el tejado') + '. Revisa el punto en GRAFCAN antes de usar esta estimación.</p>' : '') + '</section>';
   }
 
   function solarNumber(value) {
@@ -1478,16 +1563,15 @@ notify pgrst, 'reload schema';`;
       version: 1,
       company: { name: data.company.name || 'Nuestra empresa', phone: data.company.phone || '', email: data.company.email || '', brand: { appName: brand.appName, primaryColor: brand.primaryColor, secondaryColor: brand.secondaryColor, monogram: brand.monogram, iconShape: brand.iconShape } },
       clientName: client && (client.name || client.company) || '',
-      quote: { title: quote.title || 'Propuesta de trabajo', number: quote.number || '', date: quote.date || '', validUntil: quote.validUntil || '', taxName: quote.taxName || 'IGIC', taxRate: num(quote.taxRate), amount: num(quote.amount), total: total(quote), notes: quote.notes || '', items: (Array.isArray(quote.items) ? quote.items : []).map(line => ({ category: line.category || 'Otros', description: line.description || '', quantity: num(line.quantity), unit: line.unit || 'ud', unitPrice: num(line.unitPrice), amount: quoteLineTotal(line) })) },
+      quote: { title: quote.title || 'Propuesta de trabajo', number: quote.number || '', date: quote.date || '', validUntil: quote.validUntil || '', taxName: quote.taxName || 'IGIC', taxRate: num(quote.taxRate), amount: num(quote.amount), total: total(quote), clientTerms: quote.clientTerms || '', items: (Array.isArray(quote.items) ? quote.items : []).map(line => ({ category: line.category || 'Otros', description: line.description || '', quantity: num(line.quantity), unit: line.unit || 'ud', unitPrice: num(line.unitPrice), amount: quoteLineTotal(line) })) },
       solar: study ? { annualKwh: num(study.annualKwh), specificYield: num(study.specificYield), annualIrradiation: num(study.annualIrradiation), peakPower: num(study.config && study.config.peakPower), monthly: (study.monthly || []).map(row => ({ month: num(row.month), energyKwh: num(row.energyKwh) })) } : null
     };
   }
 
-  function quotePortalUrl(quote, language) {
-    const encoded = toBase64Utf8(JSON.stringify(quotePortalPayload(quote))).replace(/\+/g, '-').replace(/\//g, '_').replace(/=+$/g, '');
+  function quotePortalUrl(token, language) {
     const url = new URL(CLIENT_PORTAL_BASE_URL);
     url.searchParams.set('lang', ['en', 'de'].includes(language) ? language : 'es');
-    url.hash = 'p=' + encoded;
+    url.searchParams.set('share', String(token || ''));
     return url.href;
   }
 
@@ -1504,8 +1588,8 @@ notify pgrst, 'reload schema';`;
     const quoteId = $('.quote-share-modal', root) && $('.quote-share-modal', root).dataset.quoteId;
     const quote = quoteId && data.quotes.find(row => row.id === quoteId);
     if (!quote) return;
-    const link = quotePortalUrl(quote, language);
-    const message = quoteShareText(quote, link, language);
+    const link = root.dataset.shareUrl || '';
+    const message = link ? quoteShareText(quote, link, language) : '';
     const client = data.clients.find(row => row.id === quote.clientId);
     const phone = client && client.phone ? phoneDigits(client.phone) : '';
     const whatsapp = 'https://wa.me/' + (phone.length >= 11 ? phone : '') + '?text=' + encodeURIComponent(message);
@@ -1516,20 +1600,85 @@ notify pgrst, 'reload schema';`;
     const whatsappLink = $('#portal-share-whatsapp', root);
     const emailLink = $('#portal-share-email', root);
     if (input) input.value = link;
-    if (preview) preview.href = link;
-    if (whatsappLink) whatsappLink.href = whatsapp;
-    if (emailLink) emailLink.href = 'mailto:' + email;
+    if (preview) { preview.href = link || '#'; preview.hidden = !link; }
+    if (whatsappLink) { whatsappLink.href = link ? whatsapp : '#'; whatsappLink.hidden = !link; }
+    if (emailLink) { emailLink.href = link ? 'mailto:' + email : '#'; emailLink.hidden = !link; }
+    const copyButton = $('[data-action="copy-quote-link"]', root);
+    if (copyButton) copyButton.disabled = !link;
+    const status = $('#quote-share-status', root);
+    if (status) status.textContent = !cloudUser ? 'Inicia sesión en la sincronización privada para crear y revocar enlaces.' : link ? 'Enlace seguro creado. Caduca en 90 días y puedes revocarlo desde esta ficha.' : 'Crea un enlace individual. Las notas internas y los costes de compra no se comparten.';
+  }
+
+  function renderQuoteShareRecords(quote) {
+    const shares = Array.isArray(quote.secureShares) ? quote.secureShares : [];
+    if (!shares.length) return '<p class="modal-note">Aún no hay enlaces creados para este presupuesto.</p>';
+    return '<div class="quote-share-record-list">' + shares.slice().sort((a, b) => String(b.createdAt || '').localeCompare(String(a.createdAt || ''))).map(share => {
+      const revoked = !!share.revokedAt;
+      const expired = !!share.expiresAt && new Date(share.expiresAt).getTime() <= Date.now();
+      const state = revoked ? 'Revocado' : expired ? 'Caducado' : 'Activo · vence ' + dateFmt(String(share.expiresAt || '').slice(0, 10));
+      return '<div class="quote-share-record"><span><strong>' + esc(state) + '</strong><small>Creado ' + esc(dateFmt(String(share.createdAt || '').slice(0, 10))) + '</small></span>' + (!revoked && !expired ? '<button type="button" class="tiny-btn danger" data-action="revoke-quote-link" data-id="' + esc(share.id) + '" data-quote-id="' + esc(quote.id) + '">Revocar</button>' : '') + '</div>';
+    }).join('') + '</div>';
   }
 
   function openQuoteShare(quoteId) {
     const quote = data.quotes.find(row => row.id === quoteId);
     if (!quote) return toast('No se encontró el presupuesto para compartir.', 'bad');
     const client = data.clients.find(row => row.id === quote.clientId);
-    const link = quotePortalUrl(quote, 'es');
-    if (link.length > 14000) return toast('Esta propuesta es demasiado extensa para compartirla como enlace. Usa Imprimir / guardar PDF.', 'bad');
-    const modal = '<div class="modal-backdrop" data-action="backdrop"><section class="modal quote-share-modal" data-quote-id="' + esc(quoteId) + '" role="dialog" aria-modal="true" aria-labelledby="quote-share-title"><div class="modal-head"><h2 id="quote-share-title">Compartir propuesta con el cliente</h2><button type="button" class="close-btn" data-action="close-modal" aria-label="Cerrar">×</button></div><div class="modal-body"><div class="share-proposal-intro"><span class="share-proposal-icon">▤</span><div><strong>' + esc(quote.title || 'Propuesta de trabajo') + '</strong><p>' + esc((client && (client.name || client.company) || 'Cliente') + (quote.number ? ' · ' + quote.number : '') + ' · Total ' + money(total(quote))) + '</p></div></div><div class="field"><label for="portal-share-language">Idioma inicial</label><select id="portal-share-language"><option value="es" selected>Español</option><option value="en">English</option><option value="de">Deutsch</option></select></div><p class="share-link-note">El enlace abre una página de cliente sin iniciar sesión y muestra solo esta propuesta, los datos de contacto de tu empresa y el estudio solar si lo has añadido. Cualquiera que reciba el enlace podrá consultarla.</p><div class="field share-link-field"><label for="portal-share-url">Enlace de la propuesta</label><input id="portal-share-url" type="url" readonly value="' + esc(link) + '"></div><div class="share-proposal-actions"><button type="button" class="btn btn-primary" data-action="copy-quote-link">Copiar enlace</button><a class="btn" id="portal-share-preview" href="' + esc(link) + '" target="_blank" rel="noopener">Vista previa</a><a class="btn" id="portal-share-whatsapp" href="#" target="_blank" rel="noopener">Preparar WhatsApp</a><a class="btn" id="portal-share-email" href="#">Preparar correo</a></div><p class="modal-note">WhatsApp y correo se preparan para que revises el mensaje y lo envíes tú. No se envía nada automáticamente.</p></div></section></div>';
+    const modal = '<div class="modal-backdrop" data-action="backdrop"><section class="modal quote-share-modal" data-quote-id="' + esc(quoteId) + '" role="dialog" aria-modal="true" aria-labelledby="quote-share-title"><div class="modal-head"><h2 id="quote-share-title">Compartir propuesta con el cliente</h2><button type="button" class="close-btn" data-action="close-modal" aria-label="Cerrar">×</button></div><div class="modal-body"><div class="share-proposal-intro"><span class="share-proposal-icon">▤</span><div><strong>' + esc(quote.title || 'Propuesta de trabajo') + '</strong><p>' + esc((client && (client.name || client.company) || 'Cliente') + (quote.number ? ' · ' + quote.number : '') + ' · Total ' + money(total(quote))) + '</p></div></div><div class="field"><label for="portal-share-language">Idioma inicial</label><select id="portal-share-language"><option value="es" selected>Español</option><option value="en">English</option><option value="de">Deutsch</option></select></div><p class="share-link-note">El enlace seguro muestra solo la propuesta y los datos de contacto de tu empresa. No incluye notas internas ni costes. Caduca en 90 días y puedes revocarlo cuando quieras. Necesitas iniciar sesión y tener activada la función privada de Supabase.</p><div class="field share-link-field"><label for="portal-share-url">Enlace de la propuesta</label><input id="portal-share-url" type="url" readonly placeholder="Crea un enlace seguro para compartir"></div><div class="share-proposal-actions"><button type="button" class="btn btn-primary" data-action="create-quote-link">Crear enlace seguro · 90 días</button><button type="button" class="btn" data-action="copy-quote-link" disabled>Copiar enlace</button><a class="btn" id="portal-share-preview" href="#" target="_blank" rel="noopener" hidden>Vista previa</a><a class="btn" id="portal-share-whatsapp" href="#" target="_blank" rel="noopener" hidden>Preparar WhatsApp</a><a class="btn" id="portal-share-email" href="#" hidden>Preparar correo</a></div><p class="modal-note" id="quote-share-status"></p><div class="quote-share-existing"><h3>Enlaces de este presupuesto</h3>' + renderQuoteShareRecords(quote) + '</div><p class="modal-note">WhatsApp y correo se preparan para que revises el mensaje y lo envíes tú. No se envía nada automáticamente.</p></div></section></div>';
     $('#modal-root').innerHTML = modal;
     updateQuoteShareModal('es');
+  }
+
+  async function createQuoteShare() {
+    const root = $('.quote-share-modal', $('#modal-root'));
+    const quote = root && data.quotes.find(row => row.id === root.dataset.quoteId);
+    if (!quote) return;
+    if (!supa || !cloudUser) return toast('Inicia sesión en la sincronización privada para crear un enlace revocable.', 'bad');
+    const button = $('[data-action="create-quote-link"]', root);
+    if (button) { button.disabled = true; button.textContent = 'Creando enlace…'; }
+    try {
+      const response = await supa.functions.invoke('quote-share', { body: { action: 'create', quoteId: quote.id, payload: quotePortalPayload(quote), expiresInDays: 90 } });
+      if (response.error) throw response.error;
+      const result = response.data || {};
+      if (!result.token || !result.id || !result.expiresAt) throw new Error('La función no devolvió un enlace completo.');
+      const share = { id: result.id, createdAt: nowIso(), expiresAt: result.expiresAt, revokedAt: '' };
+      const saved = commitChange(() => { quote.secureShares = (quote.secureShares || []).concat(share); quote.updatedAt = nowIso(); });
+      if (!saved) {
+        await supa.functions.invoke('quote-share', { body: { action: 'revoke', shareId: result.id } });
+        return;
+      }
+      const language = ($('#portal-share-language', root) || {}).value || 'es';
+      root.dataset.shareUrl = quotePortalUrl(result.token, language);
+      const list = $('.quote-share-existing', root);
+      if (list) list.innerHTML = '<h3>Enlaces de este presupuesto</h3>' + renderQuoteShareRecords(quote);
+      updateQuoteShareModal(language);
+      toast('Enlace seguro creado. Caduca el ' + dateFmt(String(result.expiresAt).slice(0, 10)) + '.', 'good');
+    } catch (error) {
+      console.error('No se pudo crear el enlace seguro.', error);
+      toast('No se pudo crear el enlace revocable. Comprueba que la migración y la función quote-share estén instaladas en Supabase.', 'bad');
+    } finally {
+      const currentButton = $('[data-action="create-quote-link"]', $('#modal-root'));
+      if (currentButton) { currentButton.disabled = false; currentButton.textContent = 'Crear enlace seguro · 90 días'; }
+    }
+  }
+
+  async function revokeQuoteShare(quoteId, shareId) {
+    if (!supa || !cloudUser) return toast('Inicia sesión para revocar este enlace.', 'bad');
+    const quote = data.quotes.find(row => row.id === quoteId);
+    const share = quote && (quote.secureShares || []).find(row => row.id === shareId);
+    if (!share || !confirm('El enlace dejará de mostrar el presupuesto. ¿Revocarlo ahora?')) return;
+    try {
+      const response = await supa.functions.invoke('quote-share', { body: { action: 'revoke', shareId } });
+      if (response.error) throw response.error;
+      if (!commitChange(() => { share.revokedAt = nowIso(); quote.updatedAt = nowIso(); })) return;
+      const root = $('.quote-share-modal', $('#modal-root'));
+      const list = $('.quote-share-existing', root);
+      if (list) list.innerHTML = '<h3>Enlaces de este presupuesto</h3>' + renderQuoteShareRecords(quote);
+      toast('Enlace revocado.', 'good');
+    } catch (error) {
+      console.error('No se pudo revocar el enlace.', error);
+      toast('No se pudo revocar el enlace. Comprueba la conexión y la función quote-share.', 'bad');
+    }
   }
 
   async function copyQuoteLink() {
@@ -1704,6 +1853,7 @@ notify pgrst, 'reload schema';`;
   }
   async function geocodeCanaryAddress(address, island) {
     const rawAddress = String(address || '').replace(/\s+/g, ' ').trim();
+    if (!rawAddress) throw new Error('La obra o su cliente no tiene una dirección para buscar.');
     const inferredIsland = inferCanaryIsland(rawAddress, island);
     const cleanAddress = rawAddress
       .replace(/\b(?:portal|piso|puerta|pta\.?|escalera|bloque|blq\.?|n[uú]mero|n[uú]m\.?|n\.?)[\s:#-]*[\wºª./-]+/gi, ' ')
@@ -1771,13 +1921,7 @@ notify pgrst, 'reload schema';`;
     const canaryStatsResult = await geocodeWithCanaryStats(rawAddress, inferredIsland);
     if (canaryStatsResult) return canaryStatsResult;
 
-    const fallbackIsland = inferredIsland || 'Gran Canaria';
-    return {
-      coords: ISLAND_CENTERS[fallbackIsland] || [28.30, -15.60],
-      label: rawAddress || (inferredIsland ? 'Centro de ' + inferredIsland : 'Ubicación general de Canarias'),
-      quality: inferredIsland ? 'centro aproximado de ' + fallbackIsland : 'centro aproximado de Canarias',
-      source: inferredIsland ? 'automatic-island' : 'automatic-region'
-    };
+    throw new Error('Los geocodificadores no devolvieron un punto para esta dirección. Comprueba calle, número, municipio e isla; el punto no se sustituirá por el centro de la isla.');
   }
   function openSolarConfig(workId) {
     const work = data.works.find(row => row.id === workId);
@@ -1796,8 +1940,8 @@ notify pgrst, 'reload schema';`;
     const mapLink = '<a class="text-link" href="' + esc(grafcanViewerUrl(mapRecord, site.island)) + '" target="_blank" rel="noopener">Abrir GRAFCAN para revisar la ubicación ↗</a>';
     const approximateLocation = savedCoords && (savedAddressMatches || !site.address) && /approx|automatic/.test(saved.locationSource || '');
     const locationMessage = coords.length
-      ? '<div class="solar-autolocation"><strong>' + (approximateLocation ? 'Ubicación automática aproximada' : 'Ubicación tomada de la ficha') + '</strong><span>' + esc(site.address || site.island || saved.locationAddress || 'Coordenadas guardadas') + '</span>' + (approximateLocation ? '<small>' + esc(saved.locationQuality || 'Se ha usado el centro aproximado de la zona para que no tengas que introducir coordenadas.') + '. Si la dirección no está en el callejero, el cálculo PVGIS será aproximado.</small>' : '') + '</div>'
-      : '<div class="solar-autolocation"><strong>Localización automática de la obra</strong><span>' + esc(site.address || site.island || 'Se usará la ubicación general de Canarias') + (site.island ? ' · ' + esc(site.island) : '') + '</span><small>Buscaré la dirección en CartoCiudad y en el geocodificador del Gobierno de Canarias. Si no hay coincidencia, usaré automáticamente una ubicación aproximada de la isla o de Canarias. No tendrás que escribir coordenadas.</small></div>';
+      ? '<div class="solar-autolocation"><strong>' + (approximateLocation ? 'Ubicación aproximada detectada' : 'Ubicación tomada de la ficha') + '</strong><span>' + esc(site.address || site.island || saved.locationAddress || 'Coordenadas guardadas') + '</span>' + (approximateLocation ? '<small>' + esc(saved.locationQuality || 'Coincidencia aproximada del callejero') + '. Revisa el punto en GRAFCAN antes de usar la producción en el presupuesto.</small>' : '') + '</div>'
+      : '<div class="solar-autolocation"><strong>Buscaré la ubicación desde la dirección guardada</strong><span>' + esc(site.address || site.island || 'Añade una dirección completa a la obra o al cliente') + (site.island ? ' · ' + esc(site.island) : '') + '</span><small>Se consultan CartoCiudad y el geocodificador del Gobierno de Canarias. Si no se localiza, la app te avisará; no asignará coordenadas inventadas. Puedes dejar las coordenadas vacías.</small></div>';
     const modal = '<div class="modal-backdrop" data-action="backdrop"><section class="modal solar-config-modal" role="dialog" aria-modal="true" aria-labelledby="solar-config-title"><div class="modal-head"><h2 id="solar-config-title">Configurar estudio PVGIS</h2><button type="button" class="close-btn" data-action="close-modal" aria-label="Cerrar">×</button></div><form id="solar-config-form" data-work-id="' + esc(workId) + '"><div class="modal-body"><p class="modal-note">' + esc(work.name) + ' · ' + esc(site.address || site.island || 'Ubicación por definir') + '</p>' + locationMessage + mapLink + '<details class="solar-manual-location"><summary>Ajustar el punto del tejado manualmente (opcional)</summary><p class="hint">Normalmente basta con la dirección. Usa estas coordenadas solo si quieres desplazar el punto hasta el tejado.</p><div class="fields solar-config-fields"><div class="field"><label for="solar-latitude">Latitud</label><input id="solar-latitude" name="latitude" type="number" step="0.000001" min="-90" max="90" value="' + esc(latitude) + '"></div><div class="field"><label for="solar-longitude">Longitud</label><input id="solar-longitude" name="longitude" type="number" step="0.000001" min="-180" max="180" value="' + esc(longitude) + '"></div></div></details><div class="fields solar-config-fields"><div class="field"><label for="solar-power">Potencia pico (kWp)</label><input id="solar-power" name="peakPower" type="number" min="0.1" max="1000" step="0.1" value="' + esc(saved.peakPower == null ? '5' : saved.peakPower) + '" required></div><div class="field"><label for="solar-loss">Pérdidas del sistema (%)</label><input id="solar-loss" name="loss" type="number" min="0" max="99" step="0.1" value="' + esc(saved.loss == null ? '14' : saved.loss) + '" required></div><div class="field"><label for="solar-tilt">Inclinación del panel (°)</label><input id="solar-tilt" name="tilt" type="number" min="0" max="90" step="1" value="' + esc(saved.tilt == null ? '15' : saved.tilt) + '" required></div><div class="field"><label for="solar-azimuth">Orientación (°)</label><input id="solar-azimuth" name="azimuth" type="number" min="-180" max="180" step="1" value="' + esc(saved.azimuth == null ? '0' : saved.azimuth) + '" required><span class="hint">0° sur · 90° oeste · −90° este</span></div><div class="field full"><label for="solar-mounting">Montaje</label><select id="solar-mounting" name="mounting"><option value="building"' + (saved.mounting !== 'free' ? ' selected' : '') + '>Sobre tejado / integrado en edificio</option><option value="free"' + (saved.mounting === 'free' ? ' selected' : '') + '>Estructura independiente</option></select></div></div><div class="solar-download-steps"><strong>Cómo guardar el resultado real</strong><ol><li>Guarda la configuración y abre PVGIS.</li><li>PVGIS descargará su resultado como archivo JSON.</li><li>Vuelve a esta obra y pulsa «Importar resultado JSON».</li></ol><p>El archivo queda guardado en la ficha y se sincroniza entre tus dispositivos.</p></div></div><div class="modal-foot"><span></span><div><button type="button" class="btn" data-action="close-modal">Cancelar</button><button type="submit" class="btn btn-primary">Guardar y calcular con PVGIS</button></div></div></form></section></div>';
     $('#modal-root').innerHTML = modal;
   }
@@ -1838,15 +1982,13 @@ notify pgrst, 'reload schema';`;
       try {
         const located = await geocodeCanaryAddress(site.address, site.island);
         coords = located.coords;
-        locationLabel = located.label || site.address || site.island || 'Canarias';
+        locationLabel = located.label || site.address || site.island || '';
         locationSource = located.source || 'address';
         locationQuality = located.quality || '';
-      } catch (_) {
-        const fallbackIsland = inferCanaryIsland(site.address, site.island);
-        coords = ISLAND_CENTERS[fallbackIsland] || [28.30, -15.60];
-        locationLabel = site.address || (fallbackIsland ? 'Centro de ' + fallbackIsland : 'Ubicación general de Canarias');
-        locationSource = fallbackIsland ? 'automatic-island' : 'automatic-region';
-        locationQuality = fallbackIsland ? 'centro aproximado de ' + fallbackIsland : 'centro aproximado de Canarias';
+      } catch (error) {
+        if (submit) { submit.disabled = false; submit.textContent = 'Guardar y calcular con PVGIS'; }
+        toast((error && error.message ? error.message + ' ' : '') + 'No se han guardado coordenadas. Puedes corregir la dirección o ajustar el punto manualmente si lo prefieres.', 'bad');
+        return;
       }
       if (submit) { submit.disabled = false; submit.textContent = 'Guardar y calcular con PVGIS'; }
     }
@@ -2156,12 +2298,12 @@ notify pgrst, 'reload schema';`;
     if (!item) return;
     const title = item.name || item.company || item.title || item.number || item.kind || 'Detalle';
     const facts = [];
-    const add = (label, value) => { if (value !== '' && value != null) facts.push('<div class="row-item"><div class="row-main"><div class="row-sub">' + esc(label) + '</div><div class="row-title">' + esc(value) + '</div></div></div>'); };
+    const add = (label, value, internal) => { if (value !== '' && value != null) facts.push('<div class="row-item' + (internal ? ' internal-only' : '') + '"><div class="row-main"><div class="row-sub">' + esc(label) + '</div><div class="row-title">' + esc(value) + '</div></div></div>'); };
     if (type === 'lead') { add('Empresa', item.company); add('Estado', item.stage); add('Teléfono', item.phone); add('Correo', item.email); add('Isla', item.island); add('Dirección de visita', item.address); add('Coordenadas', siteCoordinates(item) ? siteCoordinates(item).join(', ') : ''); add('Origen', item.source); add('Valor estimado', money(item.value)); add('Próximo seguimiento', dateFmt(item.nextDate)); add('Notas', item.notes); }
     if (type === 'client') { add('Contacto', item.name); add('CIF / NIF', item.taxId); add('Teléfono', item.phone); add('Correo', item.email); add('Isla', item.island); add('Dirección', item.address); add('Notas', item.notes); }
     if (type === 'work') { add('Cliente', selected(data.clients, item.clientId)); add('Estado', item.status); add('Isla', item.island); add('Dirección', item.address); add('Coordenadas', siteCoordinates(item) ? siteCoordinates(item).join(', ') : ''); add('Inicio', dateFmt(item.start)); add('Entrega prevista', dateFmt(item.end)); add('Presupuesto', money(item.budget)); add('Avance', num(item.progress) + '%'); add('Responsable', teamName(item.owner)); add('Notas', item.notes); }
     if (type === 'task') { add('Tipo de seguimiento', item.category || 'General'); add('Estado', item.status); add('Prioridad', item.priority); add('Obra', workName(item.workId)); add('Cliente', selected(data.clients, item.clientId)); add('Fecha límite', dateFmt(item.due)); add('Responsable', teamName(item.owner)); add('Descripción', item.description); }
-    if (type === 'quote') { add('Cliente', selected(data.clients, item.clientId)); add('Obra', workName(item.workId)); add('Estado', item.status); add('Fecha', dateFmt(item.date)); add('Válido hasta', dateFmt(item.validUntil)); if (!Array.isArray(item.items) || !item.items.length) { add('Base imponible', money(item.amount)); add(item.taxName || (num(item.taxRate) === 21 ? 'Impuesto anterior' : 'IGIC'), num(item.taxRate) + '%'); add('Total', money(total(item))); } add('Descripción y condiciones', item.notes); }
+    if (type === 'quote') { add('Cliente', selected(data.clients, item.clientId)); add('Obra', workName(item.workId)); add('Estado', item.status); add('Fecha', dateFmt(item.date)); add('Válido hasta', dateFmt(item.validUntil)); if (!Array.isArray(item.items) || !item.items.length) { add('Base imponible', money(item.amount)); add(item.taxName || (num(item.taxRate) === 21 ? 'Impuesto anterior' : 'IGIC'), num(item.taxRate) + '%'); add('Total', money(total(item))); } add('Condiciones para el cliente', item.clientTerms); add('Notas internas', item.notes, true); }
     if (type === 'invoice') { add('Cliente', selected(data.clients, item.clientId)); add('Obra', workName(item.workId)); add('Estado', item.status); add('Emisión', dateFmt(item.date)); add('Vencimiento', dateFmt(item.due)); if (!Array.isArray(item.items) || !item.items.length) { add('Base imponible', money(item.amount)); add(item.taxName || (num(item.taxRate) === 21 ? 'Impuesto anterior' : 'IGIC'), num(item.taxRate) + '%'); add('Total', money(total(item))); } add('Cobrado', money(paidFor(item))); add('Pendiente', money(outstanding(item))); add('Descripción', item.notes); }
     if (type === 'expense') { add('Categoría', item.category); add('Proveedor', item.vendor); add('Fecha', dateFmt(item.date)); add('Importe', money(item.amount)); add('Obra', workName(item.workId)); add('Notas', item.notes); }
     if (type === 'event') { add('Fecha', dateFmt(item.date)); add('Hora', item.time); add('Tipo', item.kind); add('Isla', item.island); add('Dirección', item.address); add('Coordenadas', siteCoordinates(item) ? siteCoordinates(item).join(', ') : ''); add('Responsable', teamName(item.owner)); add('Notas', item.notes); }
@@ -2201,7 +2343,7 @@ notify pgrst, 'reload schema';`;
       ['title', 'Tarea', 'text', true], ['category', 'Tipo de seguimiento', 'select', false, TASK_CATEGORIES], ['workId', 'Obra relacionada', 'work'], ['clientId', 'Cliente', 'client'], ['due', 'Fecha límite', 'date'], ['priority', 'Prioridad', 'select', false, ['Alta', 'Media', 'Baja']], ['status', 'Estado', 'select', false, STATUS.task], ['owner', 'Responsable', 'team'], ['description', 'Descripción', 'textarea', false, null, 'full']
     ],
     quote: [
-      ['title', 'Concepto / asunto', 'text', true], ['number', 'Número de presupuesto', 'text'], ['clientId', 'Cliente', 'client', true], ['workId', 'Obra relacionada', 'work'], ['date', 'Fecha', 'date'], ['validUntil', 'Válido hasta', 'date'], ['taxRate', 'IGIC (%)', 'number'], ['status', 'Estado', 'select', false, STATUS.quote], ['notes', 'Detalle y condiciones', 'textarea', false, null, 'full']
+      ['title', 'Concepto / asunto', 'text', true], ['number', 'Número de presupuesto', 'text'], ['clientId', 'Cliente', 'client', true], ['workId', 'Obra relacionada', 'work'], ['date', 'Fecha', 'date'], ['validUntil', 'Válido hasta', 'date'], ['taxRate', 'IGIC (%)', 'number'], ['status', 'Estado', 'select', false, STATUS.quote], ['clientTerms', 'Condiciones visibles para el cliente', 'textarea', false, null, 'full'], ['notes', 'Notas internas (no visibles al cliente)', 'textarea', false, null, 'full']
     ],
     invoice: [
       ['title', 'Concepto / asunto', 'text', true], ['number', 'Número de factura', 'text'], ['clientId', 'Cliente', 'client', true], ['workId', 'Obra relacionada', 'work'], ['date', 'Fecha de emisión', 'date'], ['due', 'Fecha de vencimiento', 'date'], ['amount', 'Base imponible (€)', 'number', true], ['taxRate', 'IGIC (%)', 'number'], ['status', 'Estado', 'select', false, STATUS.invoice], ['notes', 'Detalle', 'textarea', false, null, 'full']
@@ -2352,9 +2494,13 @@ notify pgrst, 'reload schema';`;
     const saved = customCatalogPriceFor(item);
     const costOnly = !!(item.costOnly && !saved);
     const currentSupplierCost = item.source === 'coelca' ? quoteUnitCost(item) : null;
+    const normalizedDescription = normalizeSearchText(item.description || '');
+    const laborCost = normalizedDescription.includes('oficial de 1 electricista') || normalizedDescription.includes('oficial 1 electricista')
+      ? data.company.laborOfficialCost : normalizedDescription.includes('ayudante electricista') ? data.company.laborHelperCost : '';
+    const configuredLaborCost = laborCost !== '' && laborCost != null ? Math.max(0, num(laborCost)) : null;
     const suggestedQuantity = item.quantityRule ? suggestedCatalogQuantity(item, form) : saved && saved.defaultQuantity || item.defaultQuantity || 1;
-    const unitCost = currentSupplierCost != null ? currentSupplierCost : saved && saved.unitCost != null ? saved.unitCost : quoteUnitCost(item);
-    const unitCostSource = currentSupplierCost != null ? quoteUnitCostSource(item) : saved && saved.unitCostSource || quoteUnitCostSource(item) || (costOnly ? 'Coelca · tarifa importada' : '');
+    const unitCost = currentSupplierCost != null ? currentSupplierCost : saved && saved.unitCost != null ? saved.unitCost : configuredLaborCost != null ? configuredLaborCost : quoteUnitCost(item);
+    const unitCostSource = currentSupplierCost != null ? quoteUnitCostSource(item) : saved && saved.unitCostSource || (configuredLaborCost != null ? 'Coste horario real configurado por la empresa' : quoteUnitCostSource(item) || (costOnly ? 'Coelca · tarifa importada' : ''));
     return { category: item.category || 'Otros', description: item.description, quantity: quantity == null ? suggestedQuantity : quantity, unit: item.unit || 'ud', unitPrice: costOnly ? '' : catalogEffectivePrice(item), unitCost, unitCostSource, coelcaReference: item.reference || '', priceReference: saved ? 'Mi tarifa guardada' : source.label || '', priceReferenceUrl: source.url || '', priceRange: saved ? '' : item.range || '', priceReferenceNote: costOnly ? 'Coste de compra Coelca importado. Indica el precio de venta que cobrarás al cliente.' : saved ? 'Se ha aplicado tu precio de venta guardado; el coste se conserva para calcular el margen.' : item.sourceNote || '' };
   }
   function addCatalogQuoteLine(form, catalogId) {
@@ -3102,6 +3248,14 @@ notify pgrst, 'reload schema';`;
       result[c] = Array.from(map.values()).filter(item => Number(deletes[item.id] || 0) < new Date(item.updatedAt || item.createdAt || 0).getTime());
       result._meta.deleted[c] = deletes;
     });
+    const resolvedConflicts = Object.assign({}, (local._meta && local._meta.resolvedConflicts) || {}, (remote._meta && remote._meta.resolvedConflicts) || {});
+    const conflictMap = new Map();
+    ((local._meta && local._meta.syncConflicts) || []).concat((remote._meta && remote._meta.syncConflicts) || []).forEach(conflict => {
+      if (!conflict || !conflict.id || resolvedConflicts[conflict.id]) return;
+      conflictMap.set(conflict.id, conflict);
+    });
+    result._meta.syncConflicts = Array.from(conflictMap.values());
+    result._meta.resolvedConflicts = resolvedConflicts;
     const localUpdated = Number(local._meta && local._meta.companyUpdated || 0);
     const remoteUpdated = Number(remote._meta && remote._meta.companyUpdated || 0);
     result.company = remoteUpdated > localUpdated ? remote.company : local.company;
@@ -3162,32 +3316,87 @@ notify pgrst, 'reload schema';`;
     }
     cloudBusy = true; updateCloudPill('busy');
     const previousData = JSON.stringify(data);
+    const previousConflictCount = (data._meta.syncConflicts || []).length;
     try {
       const result = await supa.from(CLOUD_TABLE).select('payload,updated_at').eq('user_id', cloudUser.id).maybeSingle();
       if (result.error) throw result.error;
       let remote = result.data && result.data.payload ? normalize(result.data.payload) : null;
-      if (remote) data = mergeData(data, remote);
+      const shouldReplaceRemote = replaceCloudOnNextSync || localStorage.getItem(KEY + '_replace_cloud_pending') === '1';
+      if (remote && !shouldReplaceRemote) {
+        let snapshot = null;
+        try { snapshot = JSON.parse(localStorage.getItem(KEY + '_sync_base') || 'null'); } catch (_) {}
+        const conflicts = snapshot ? CORE.findSyncConflicts(snapshot, data, remote) : CORE.findUnbasedConflicts(data, remote);
+        conflicts.forEach(conflict => {
+          const same = (data._meta.syncConflicts || []).some(row => row.collection === conflict.collection && row.recordId === conflict.recordId && row.localHash === conflict.localHash && row.remoteHash === conflict.remoteHash);
+          if (same) return;
+          data._meta.syncConflicts.push(Object.assign({ id: uid(), detectedAt: nowIso() }, conflict));
+        });
+        data = mergeData(data, remote);
+      }
       const payload = clone(data);
-      const saveResult = await supa.from(CLOUD_TABLE).upsert({ user_id: cloudUser.id, payload, updated_at: nowIso() }, { onConflict: 'user_id' });
-      if (saveResult.error) throw saveResult.error;
+      const previousRemoteTime = result.data && Date.parse(result.data.updated_at);
+      const remoteUpdatedAt = new Date(Math.max(Date.now(), Number.isFinite(previousRemoteTime) ? previousRemoteTime + 1 : 0)).toISOString();
+      let saveResult;
+      if (result.data) {
+        saveResult = await supa.from(CLOUD_TABLE).update({ payload, updated_at: remoteUpdatedAt })
+          .eq('user_id', cloudUser.id).eq('updated_at', result.data.updated_at).select('user_id').maybeSingle();
+        if (saveResult.error) throw saveResult.error;
+        if (!saveResult.data) {
+          const raceError = new Error('La nube cambió durante la sincronización; se volverá a comparar antes de guardar.');
+          raceError.code = 'GC_SYNC_RACE';
+          throw raceError;
+        }
+      } else {
+        saveResult = await supa.from(CLOUD_TABLE).insert({ user_id: cloudUser.id, payload, updated_at: remoteUpdatedAt }).select('user_id').maybeSingle();
+        if (saveResult.error) {
+          if (String(saveResult.error.code || '') === '23505') {
+            const raceError = new Error('La nube se creó durante la sincronización; se volverá a comparar antes de guardar.');
+            raceError.code = 'GC_SYNC_RACE';
+            throw raceError;
+          }
+          throw saveResult.error;
+        }
+        if (!saveResult.data) throw new Error('Supabase no confirmó la escritura de datos.');
+      }
       cloudProblem = '';
       cloudSetupRequired = false;
-      localStorage.setItem(KEY, JSON.stringify(data));
-      localStorage.setItem(KEY + '_cloud_at', nowIso());
+      cloudRaceRetryCount = 0;
+      if (shouldReplaceRemote) {
+        replaceCloudOnNextSync = false;
+        try { localStorage.removeItem(KEY + '_replace_cloud_pending'); } catch (_) {}
+      }
+      try {
+        localStorage.setItem(KEY, JSON.stringify(data));
+        localStorage.setItem(KEY + '_cloud_at', nowIso());
+        localStorage.setItem(KEY + '_sync_base', JSON.stringify(CORE.makeSyncSnapshot(data)));
+      } catch (storageError) { console.warn('No se pudo guardar el estado de sincronización local.', storageError); }
       mirrorBridgeStorage();
       updateCloudPill('ok');
-      if (force) toast('Sincronización completada.', 'good');
+      const currentConflictCount = (data._meta.syncConflicts || []).length;
+      const addedConflicts = currentConflictCount - previousConflictCount;
+      if (addedConflicts > 0) toast('Detecté cambios distintos en ' + addedConflicts + ' registro(s). Revisa Ajustes → Datos y nube para elegir qué versión conservar.', 'bad');
+      else if (force) toast('Sincronización completada.', 'good');
       if (JSON.stringify(data) !== previousData) {
         if ($('#modal-root').children.length) cloudRefreshPending = true;
         else render();
       }
     } catch (err) {
       console.error('Error de sincronización:', err);
-      cloudProblem = cloudErrorMessage(err);
       const code = String(err && err.code || '').toLowerCase();
-      cloudSetupRequired = code === 'pgrst205' || code === '42p01' || /could not find the table|relation .* does not exist/i.test(String(err && err.message || ''));
-      updateCloudPill('error');
-      if (force) toast(cloudProblem, 'bad');
+      const syncRace = code === 'gc_sync_race';
+      if (syncRace && cloudRaceRetryCount < 3) {
+        cloudRaceRetryCount++;
+        cloudSyncPending = true;
+        cloudSyncPendingForce = cloudSyncPendingForce || !!force;
+        cloudProblem = 'La nube cambió a la vez que este dispositivo. Estoy comparando ambas versiones antes de guardar.';
+        updateCloudPill('busy');
+      } else {
+        cloudRaceRetryCount = 0;
+        cloudProblem = syncRace ? 'La nube siguió cambiando durante varios intentos. Tus datos locales siguen guardados; pulsa Sincronizar ahora para volver a intentarlo.' : cloudErrorMessage(err);
+        cloudSetupRequired = code === 'pgrst205' || code === '42p01' || /could not find the table|relation .* does not exist/i.test(String(err && err.message || ''));
+        updateCloudPill('error');
+        if (force) toast(cloudProblem, 'bad');
+      }
       if (view === 'settings') {
         if ($('#modal-root').children.length) cloudRefreshPending = true;
         else render();
@@ -3198,9 +3407,39 @@ notify pgrst, 'reload schema';`;
         const pendingForce = cloudSyncPendingForce;
         cloudSyncPending = false;
         cloudSyncPendingForce = false;
-        setTimeout(() => syncCloud(pendingForce), 0);
+        setTimeout(() => syncCloud(pendingForce), 250);
       }
     }
+  }
+
+  function syncConflictCaption(item) {
+    if (!item) return 'Registro eliminado en este dispositivo';
+    return [item.name || item.company || item.title || item.number || item.description || 'Registro', item.stage || item.status || '', item.updatedAt ? dateFmt(String(item.updatedAt).slice(0, 10)) : ''].filter(Boolean).join(' · ');
+  }
+
+  function resolveSyncConflict(conflictId, versionName) {
+    const conflict = (data._meta.syncConflicts || []).find(row => row.id === conflictId);
+    if (!conflict || !COLLECTIONS.includes(conflict.collection)) return;
+    const chosen = conflict[versionName === 'remote' ? 'remoteVersion' : 'localVersion'];
+    if (!confirm('Se conservará esta versión de «' + syncConflictCaption(chosen) + '» y se sincronizará en tus dispositivos. ¿Confirmas?')) return;
+    const collection = conflict.collection;
+    const recordId = String(conflict.recordId);
+    const competingTimes = [conflict.localVersion, conflict.remoteVersion].map(row => row && new Date(row.updatedAt || row.createdAt || 0).getTime()).filter(Number.isFinite);
+    const resolutionTime = Math.max(Date.now(), ...competingTimes) + 1000;
+    if (!data._meta.deleted[collection]) data._meta.deleted[collection] = {};
+    if (chosen) {
+      const saved = Object.assign({}, clone(chosen), { id: recordId, updatedAt: new Date(resolutionTime).toISOString() });
+      const index = data[collection].findIndex(row => String(row.id) === recordId);
+      if (index >= 0) data[collection][index] = saved;
+      else data[collection].push(saved);
+      delete data._meta.deleted[collection][recordId];
+    } else {
+      data[collection] = data[collection].filter(row => String(row.id) !== recordId);
+      data._meta.deleted[collection][recordId] = resolutionTime;
+    }
+    data._meta.resolvedConflicts[conflict.id] = new Date(resolutionTime).toISOString();
+    data._meta.syncConflicts = data._meta.syncConflicts.filter(row => row.id !== conflict.id);
+    if (save()) { render(); toast('Conflicto resuelto. La versión elegida se sincronizará.', 'good'); }
   }
 
   async function cloudLogin(form, mode) {
@@ -3252,38 +3491,75 @@ notify pgrst, 'reload schema';`;
     return btoa(binary);
   }
   function download(name, content, type) {
+    const run = () => downloadNow(name, content, type);
+    const result = downloadQueue.then(run, run);
+    downloadQueue = result.then(() => undefined, () => undefined);
+    return result;
+  }
+  function downloadNow(name, content, type) {
     const mime = type || 'application/octet-stream';
     const encoded = toBase64Utf8(content);
     if (window.AndroidBridge && typeof window.AndroidBridge.saveFile === 'function') {
-      window.AndroidBridge.saveFile(encoded, name, mime, String(Date.now()));
-      return;
+      const requestId = String(Date.now()) + String(++saveRequestSequence).padStart(5, '0');
+      return new Promise(resolve => {
+        pendingNativeSaves.set(requestId, resolve);
+        try { window.AndroidBridge.saveFile(encoded, name, mime, requestId); }
+        catch (_) { pendingNativeSaves.delete(requestId); resolve(false); }
+      });
     }
     if (window.GestionClientesDesktopBridge && typeof window.GestionClientesDesktopBridge.saveFile === 'function') {
-      window.GestionClientesDesktopBridge.saveFile(name, mime, encoded).then(saved => toast(saved ? 'Archivo guardado.' : 'No se guardó el archivo.', saved ? 'good' : 'bad'));
-      return;
+      return window.GestionClientesDesktopBridge.saveFile(name, mime, encoded).then(Boolean).catch(() => false);
     }
     const blob = new Blob([content], { type: type || 'application/octet-stream' });
     const url = URL.createObjectURL(blob);
     const a = document.createElement('a'); a.href = url; a.download = name; a.click();
     setTimeout(() => URL.revokeObjectURL(url), 1000);
+    return Promise.resolve(true);
   }
-  function backup() {
+  async function backup() {
     const payload = { app: 'Gestión Clientes', exportedAt: nowIso(), data };
-    download('gestion-clientes-copia-' + today + '.json', JSON.stringify(payload, null, 2), 'application/json');
-    toast('Copia de seguridad descargada.', 'good');
+    const saved = await download('gestion-clientes-copia-' + today + '.json', JSON.stringify(payload, null, 2), 'application/json');
+    toast(saved ? 'Copia de seguridad guardada.' : 'No se guardó la copia de seguridad.', saved ? 'good' : 'bad');
   }
-  function restoreFile(file) {
+  async function restoreFile(file) {
     if (!file) return;
-    const reader = new FileReader();
-    reader.onload = () => {
+    try {
+      const parsed = JSON.parse(await file.text());
+      const inspected = CORE.inspectBackup(parsed);
+      if (!inspected.valid) throw new Error(inspected.error);
+      const recordCount = Object.values(inspected.counts).reduce((sum, count) => sum + count, 0);
+      const countSummary = Object.entries(inspected.counts).filter(([, count]) => count).map(([name, count]) => count + ' ' + name).join(', ') || 'ningún registro';
+      const cloudText = cloudUser ? ' La nube conectada también se reemplazará con esta copia y se sincronizará en tus otros dispositivos.' : '';
+      if (!confirm('La copia contiene ' + recordCount + ' registros (' + countSummary + '). Se sustituirán los datos locales.' + cloudText + '\n\nAntes descargaré una copia de seguridad del estado actual. ¿Continuar?')) return;
+      const safety = { app: 'Gestión Clientes', exportedAt: nowIso(), reason: 'Antes de restaurar ' + (file.name || ''), data };
+      const safetySaved = await download('gestion-clientes-antes-de-restaurar-' + today + '.json', JSON.stringify(safety, null, 2), 'application/json');
+      if (!safetySaved) return toast('No se sustituyeron los datos porque no se guardó la copia de seguridad previa.', 'bad');
+      const previousData = data;
+      const previousRecoveryState = storageRecoveryRequired;
+      data = normalize(inspected.data);
+      storageRecoveryRequired = false;
+      replaceCloudOnNextSync = !!cloudUser;
       try {
-        const parsed = JSON.parse(String(reader.result || '{}'));
-        const incoming = normalize(parsed.data || parsed);
-        if (!confirm('Restaurar sustituirá los datos actuales de esta instalación. ¿Continuar?')) return;
-        if (commitChange(() => { data = incoming; })) { render(); toast('Copia restaurada correctamente.', 'good'); }
-      } catch (_) { toast('El archivo no contiene una copia válida.', 'bad'); }
-    };
-    reader.readAsText(file);
+        if (replaceCloudOnNextSync) localStorage.setItem(KEY + '_replace_cloud_pending', '1');
+        else localStorage.removeItem(KEY + '_replace_cloud_pending');
+      } catch (_) {}
+      if (!save(false)) {
+        data = previousData;
+        storageRecoveryRequired = previousRecoveryState;
+        replaceCloudOnNextSync = false;
+        try { localStorage.removeItem(KEY + '_replace_cloud_pending'); } catch (_) {}
+        return;
+      }
+      if (storageRecoveryRequired) return;
+      if (cloudUser) syncCloud(true);
+      render();
+      toast('Copia restaurada. Se sustituyeron ' + recordCount + ' registros locales' + (cloudUser ? ' y se actualizará la copia de nube.' : '.'), 'good');
+    } catch (error) {
+      toast(error && error.message || 'El archivo no contiene una copia válida.', 'bad');
+    } finally {
+      const input = $('#restore-input');
+      if (input) input.value = '';
+    }
   }
   function csvEscape(v) { let s = String(v == null ? '' : v); if (/^[\s]*[=+\-@]/.test(s)) s = "'" + s; return '"' + s.replace(/"/g, '""') + '"'; }
   function csvFor(collection) {
@@ -3295,20 +3571,28 @@ notify pgrst, 'reload schema';`;
       if (k === 'workId') return csvEscape(workName(x[k]));
       if (k === 'owner') return csvEscape(teamName(x[k]));
       if (k === 'activityLog') return csvEscape(JSON.stringify(x[k] || []));
+      if (x[k] && typeof x[k] === 'object') return csvEscape(JSON.stringify(x[k]));
       return csvEscape(x[k]);
     }).join(';'))).join('\r\n');
   }
-  function exportAll() {
-    COLLECTIONS.forEach(c => { if (data[c].length) download('gestion-clientes-' + c + '-' + today + '.csv', csvFor(c), 'text/csv;charset=utf-8'); });
-    toast('Exportación iniciada para los registros disponibles.', 'good');
+  async function exportAll() {
+    const collections = COLLECTIONS.filter(collection => data[collection].length);
+    if (!collections.length) return toast('No hay registros para exportar.', 'bad');
+    for (let index = 0; index < collections.length; index++) {
+      const collection = collections[index];
+      const saved = await download('gestion-clientes-' + collection + '-' + today + '.csv', csvFor(collection), 'text/csv;charset=utf-8');
+      if (!saved) return toast('Exportación detenida en ' + collection + '. Se guardaron ' + index + ' de ' + collections.length + ' archivos.', 'bad');
+    }
+    toast('Exportación completa: ' + collections.length + ' archivos CSV guardados.', 'good');
   }
-  function exportReport() {
+  async function exportReport() {
     const groups = [
       ['Leads', data.leads], ['Clientes', data.clients], ['Obras', data.works], ['Tareas', data.tasks], ['Presupuestos', data.quotes], ['Facturas', data.invoices], ['Cobros', data.payments], ['Gastos', data.expenses]
     ];
     let lines = ['Sección;Registro;Estado;Relacionado;Importe;Fecha'];
     groups.forEach(([name, rows]) => rows.forEach(x => lines.push([name, x.name || x.title || x.number || '', x.stage || x.status || '', selected(data.clients, x.clientId) || workName(x.workId) || '', x.amount == null ? '' : x.amount, x.date || x.due || x.createdAt || ''].map(csvEscape).join(';'))));
-    download('gestion-clientes-informe-' + today + '.csv', '\ufeff' + lines.join('\r\n'), 'text/csv;charset=utf-8');
+    const saved = await download('gestion-clientes-informe-' + today + '.csv', '\ufeff' + lines.join('\r\n'), 'text/csv;charset=utf-8');
+    toast(saved ? 'Informe CSV guardado.' : 'No se pudo guardar el informe CSV.', saved ? 'good' : 'bad');
   }
   function printPage() {
     if (window.AndroidBridge && typeof window.AndroidBridge.printReport === 'function') window.AndroidBridge.printReport();
@@ -3386,6 +3670,8 @@ notify pgrst, 'reload schema';`;
     if (action === 'solar-config') { openSolarConfig(target.dataset.id); return; }
     if (action === 'solar-download') { downloadSolarResult(target.dataset.id); return; }
     if (action === 'share-quote') { openQuoteShare(target.dataset.id); return; }
+    if (action === 'create-quote-link') { createQuoteShare(); return; }
+    if (action === 'revoke-quote-link') { revokeQuoteShare(target.dataset.quoteId, target.dataset.id); return; }
     if (action === 'copy-quote-link') { copyQuoteLink(); return; }
     if (action === 'quote-to-invoice') { quoteToInvoice(target.dataset.id); return; }
     if (action === 'export-quote-materials') { exportQuoteMaterials(target.dataset.id); return; }
@@ -3401,11 +3687,17 @@ notify pgrst, 'reload schema';`;
     if (action === 'myday-today') { myDayDate = today; render(); return; }
     if (action === 'month-shift') { const d = new Date(agendaMonth + '-01T12:00:00'); d.setMonth(d.getMonth() + Number(target.dataset.delta || 0)); agendaMonth = dateKey(d).slice(0, 7); render(); return; }
     if (action === 'month-today') { agendaMonth = today.slice(0, 7); render(); return; }
+    if (action === 'resolve-sync-conflict') { resolveSyncConflict(target.dataset.id, target.dataset.version); return; }
+    if (action === 'export-sync-conflicts') {
+      const content = { app: 'Gestión Clientes', exportedAt: nowIso(), conflicts: data._meta.syncConflicts || [] };
+      download('gestion-clientes-conflictos-' + today + '.json', JSON.stringify(content, null, 2), 'application/json').then(saved => toast(saved ? 'Versiones en conflicto guardadas.' : 'No se guardó el archivo de conflictos.', saved ? 'good' : 'bad'));
+      return;
+    }
     if (action === 'backup') { backup(); return; }
     if (action === 'restore') { $('#restore-input').click(); return; }
     if (action === 'export-all') { exportAll(); return; }
     if (action === 'export-report') { exportReport(); return; }
-    if (action === 'cloud-setup') { download('gestion-clientes-supabase-setup.sql', CLOUD_SETUP_SQL, 'text/plain;charset=utf-8'); toast('SQL de Gestión Clientes descargado. Ejecútalo en Supabase y vuelve a sincronizar.', 'good'); return; }
+    if (action === 'cloud-setup') { download('gestion-clientes-supabase-setup.sql', CLOUD_SETUP_SQL, 'text/plain;charset=utf-8').then(saved => toast(saved ? 'SQL de Gestión Clientes guardado. Revísalo antes de ejecutarlo.' : 'No se guardó el archivo SQL.', saved ? 'good' : 'bad')); return; }
     if (action === 'toggle-theme') { toggleTheme(); return; }
     if (action === 'print') { printPage(); return; }
     if (action === 'cloud-sync') { syncCloud(true); return; }
@@ -3533,6 +3825,7 @@ notify pgrst, 'reload schema';`;
       new FormData(event.target).forEach((v, k) => { companyValues[k] = String(v).trim(); });
       companyValues.taxName = 'IGIC';
       companyValues.taxRate = num(companyValues.taxRate);
+      ['laborOfficialCost', 'laborHelperCost'].forEach(key => { companyValues[key] = companyValues[key] === '' ? '' : num(companyValues[key]); });
       if (commitChange(() => {
         Object.assign(data.company, companyValues);
         data._meta.companyUpdated = Date.now();
@@ -3564,6 +3857,11 @@ notify pgrst, 'reload schema';`;
       if (input) { input.focus(); input.setSelectionRange(caret, caret); }
     }
     if (event.target.matches('[data-quote-field="unit"]')) event.target.dataset.autoUnit = 'false';
+    if (event.target.matches('[data-quote-field="unitCost"]')) {
+      const row = event.target.closest('.quote-line-card');
+      const source = row && $('[data-quote-field="unitCostSource"]', row);
+      if (source) source.value = 'Coste manual editado en este presupuesto';
+    }
     if (event.target.form && event.target.form.id === 'entity-form' && ['address', 'latitude', 'longitude'].includes(event.target.name)) {
       event.target.dataset.inherited = 'false';
       if (event.target.name === 'address') ['latitude', 'longitude'].forEach(name => {
@@ -3658,7 +3956,13 @@ notify pgrst, 'reload schema';`;
   window.addEventListener('online', () => { if (cloudUser) syncCloud(false); });
   document.addEventListener('visibilitychange', () => { if (!document.hidden && cloudUser) syncCloud(false); });
   setInterval(() => { if (cloudUser && !document.hidden) syncCloud(false); }, 60000);
-  window.__gestionClientesNativeSaveResult = (requestId, saved) => toast(saved ? 'Archivo guardado.' : 'No se guardó el archivo.', saved ? 'good' : 'bad');
+  window.__gestionClientesNativeSaveResult = (requestId, saved) => {
+    const resolve = pendingNativeSaves.get(String(requestId));
+    if (resolve) {
+      pendingNativeSaves.delete(String(requestId));
+      resolve(!!saved);
+    } else if (!saved) toast('No se guardó el archivo.', 'bad');
+  };
   if ('serviceWorker' in navigator && location.protocol !== 'file:') {
     let updateWaiting = false;
     let refreshingForUpdate = false;
@@ -3693,6 +3997,9 @@ notify pgrst, 'reload schema';`;
     setInterval(refreshAfterUpdateWhenSafe, 3000);
   }
   applyTheme();
+  updateNavigationState();
   render();
+  if (storageRecoveredFromBridge) setTimeout(() => toast('Se recuperaron los datos desde la copia segura de este dispositivo.', 'good'), 250);
+  if (storageRecoveryRequired) setTimeout(() => toast('Los datos necesitan recuperación. Restaura una copia JSON válida antes de editar.', 'bad'), 250);
   initCloud();
 })();

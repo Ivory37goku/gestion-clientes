@@ -5,7 +5,7 @@ plugins {
 def webAppRoot = rootProject.projectDir.parentFile
 tasks.register('syncWebAssets', Sync) {
     from(webAppRoot) {
-        include 'index.html', 'cliente.html', 'app.js', 'styles.css', 'manifest.json', 'sw.js', 'supabase-config.js'
+        include 'index.html', 'cliente.html', 'core.js', 'app.js', 'styles.css', 'manifest.json', 'sw.js', 'supabase-config.js'
         include 'icon-192.png', 'icon-512.png', 'icon-512-maskable.png', 'brand-icon.svg'
     }
     from(new File(webAppRoot, 'vendor')) {
@@ -27,8 +27,8 @@ android {
         applicationId 'com.ivory37.gestionclientes'
         minSdk 24
         targetSdk 34
-        versionCode 23
-        versionName '1.0.23'
+        versionCode 24
+        versionName '1.0.24'
     }
 }
 

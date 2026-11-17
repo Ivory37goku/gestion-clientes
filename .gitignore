@@ -1,4 +1,5 @@
 node_modules/
+/tmp/
 desktop-dist/
 downloads/*.exe
 downloads/*.exe.blockmap
@@ -7,6 +8,7 @@ android-app/.idea/
 android-app/build/
 android-app/app/build/
 android-app/local.properties
+supabase/.temp/
 *.jks
 *.keystore
 *.log

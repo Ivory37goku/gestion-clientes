@@ -6,6 +6,7 @@
   <meta name="color-scheme" content="dark light">
   <meta name="theme-color" content="#101711">
   <meta name="description" content="Consulta una propuesta de Gestión Clientes.">
+  <meta name="referrer" content="no-referrer">
   <title>Propuesta de trabajo · Gestión Clientes</title>
   <style>
     :root{font-family:Inter,Geist,"Segoe UI",system-ui,-apple-system,sans-serif;color-scheme:dark;--bg:#0a100c;--panel:rgba(20,30,22,.88);--line:rgba(194,220,165,.16);--text:#f3f1e8;--muted:#a5b09b;--brand:#b3df68;--brand-dark:#1b2a15;--shadow:0 24px 70px rgba(0,0,0,.34)}
@@ -36,6 +37,7 @@
       <footer class="footer" id="footer">Propuesta compartida con Gestión Clientes</footer>
     </main>
   </div>
+  <script src="./supabase-config.js"></script>
   <script>
     (function () {
       'use strict';
@@ -59,6 +61,20 @@
         let raw=match[1].replace(/-/g,'+').replace(/_/g,'/'); while(raw.length%4) raw+='=';
         const bytes=Uint8Array.from(atob(raw),char=>char.charCodeAt(0));
         return JSON.parse(new TextDecoder().decode(bytes));
+      }
+      async function resolvePayload() {
+        const params=new URLSearchParams(location.search);
+        const token=params.get('share');
+        if(!token) return decodePayload();
+        const config=window.GESTION_CLIENTES_SUPABASE_CONFIG||{};
+        if(!config.url||!config.publishableKey) throw new Error('sharing unavailable');
+        const endpoint=String(config.url).replace(/\/$/,'')+'/functions/v1/quote-share?token='+encodeURIComponent(token);
+        const response=await fetch(endpoint,{method:'GET',headers:{apikey:config.publishableKey},cache:'no-store',credentials:'omit',referrerPolicy:'no-referrer'});
+        const result=await response.json().catch(()=>({}));
+        if(!response.ok||!result.payload) throw new Error('link unavailable');
+        const clean=new URL(location.href); clean.searchParams.delete('share');
+        history.replaceState(null,'',clean.pathname+clean.search);
+        return result.payload;
       }
       function element(tag,className,value) { const node=document.createElement(tag); if(className) node.className=className; if(value!=null) node.textContent=String(value); return node; }
       function renderItems() {
@@ -90,15 +106,15 @@
         const quote=data.quote; document.title=(quote.title||t.items)+' · '+data.company.name;
         text('quote-title',quote.title); text('greeting',replace(t.greeting,{name:data.clientName||''})); text('quote-number',(quote.number?t.number+' · '+quote.number:'')); text('quote-date',(quote.date?t.date+' · '+date(quote.date):'')); text('quote-expiry',(quote.validUntil?t.valid+' · '+date(quote.validUntil):'')); text('quote-total',money(quote.total)); text('quote-tax-line',t.subtotal+': '+money(quote.amount)+' · '+(quote.taxName||'IGIC')+' ('+number(quote.taxRate)+'%): '+money(Number(quote.total)-Number(quote.amount))); text('company-name',data.company.name); text('company-contact',[data.company.phone,data.company.email].filter(Boolean).join(' · '));
         text('quote-grand-total',money(quote.total)); text('tax-label',(quote.taxName||'IGIC')+' ('+number(quote.taxRate)+'%)');
-        if(quote.notes){text('conditions',quote.notes);$('conditions-section').hidden=false;}
+        const clientTerms=quote.clientTerms||quote.notes||''; if(clientTerms){text('conditions',clientTerms);$('conditions-section').hidden=false;}
         renderItems(); renderSolar();
         const message=replace(t.reply,{title:quote.title||t.items,number:quote.number?' · '+quote.number:'',url:location.href});
         const email=$('email-button'); if(data.company.email){email.href='mailto:'+encodeURIComponent(data.company.email)+'?subject='+encodeURIComponent(t.number+' · '+(quote.number||quote.title))+'&body='+encodeURIComponent(message);email.hidden=false;}
         const whatsapp=$('whatsapp-button'); const phone=String(data.company.phone||'').replace(/\D/g,''); if(phone.length>=9){whatsapp.href='https://wa.me/'+(phone.length===9?'34':'')+phone+'?text='+encodeURIComponent(message);whatsapp.hidden=false;}
         text('error-title',t.errorTitle); text('error-message',t.errorMessage);
       }
-      try { data=decodePayload(); if(!data||data.version!==1||!data.quote||!data.company) throw new Error('invalid'); $('loading').hidden=true; $('proposal').hidden=false; const lang=new URLSearchParams(location.search).get('lang')||(/^de/i.test(navigator.language)?'de':/^en/i.test(navigator.language)?'en':'es'); render(lang); }
-      catch (_) { $('loading').hidden=true; $('error').hidden=false; }
+      const initialLanguage=new URLSearchParams(location.search).get('lang')||(/^de/i.test(navigator.language)?'de':/^en/i.test(navigator.language)?'en':'es');
+      resolvePayload().then(payload=>{data=payload;if(!data||data.version!==1||!data.quote||!data.company)throw new Error('invalid');$('loading').hidden=true;$('proposal').hidden=false;render(initialLanguage);}).catch(()=>{$('loading').hidden=true;$('error').hidden=false;});
       document.querySelectorAll('[data-language]').forEach(button=>button.addEventListener('click',()=>render(button.dataset.language)));
       $('print-button').addEventListener('click',()=>window.print());
     })();
