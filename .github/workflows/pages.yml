@@ -26,6 +26,8 @@ jobs:
         with:
           name: github-pages-${{ github.run_id }}-${{ github.run_attempt }}
           path: .
+      - name: Allow the uploaded Pages artifact to reach the deployment API
+        run: sleep 20
       - id: deployment
         uses: actions/deploy-pages@v4
         with:
